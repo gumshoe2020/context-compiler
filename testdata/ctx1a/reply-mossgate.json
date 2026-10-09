@@ -1,0 +1,16 @@
+{
+ "entries": [
+  {
+   "title": "Mossgate bakery lease signing",
+   "body": "The Mossgate bakery rent is 840 crowns a month from April. Petra Ollin signs the lease on the 28th and Bram Feld brings the keys that day.",
+   "tags": ["mossgate-bakery", "lease"]
+  }
+ ],
+ "claims": [
+  {"kind": "specific", "subject": "Mossgate bakery rent", "predicate": "is", "object": "840 crowns a month from April", "date": "2025-03-04", "quote": "The Mossgate bakery rent is 840 crowns a month from April.", "line": 1},
+  {"kind": "specific", "subject": "Petra Ollin", "predicate": "signs the Mossgate lease on", "object": "the 28th", "date": "2025-03-04", "quote": "Petra Ollin signs the Mossgate lease on the 28th.", "line": 3}
+ ],
+ "relations": [
+  {"subject": "mossgate-bakery", "predicate": "leased_by", "object": "petra-ollin", "confidence": 0.9, "line": 3}
+ ]
+}

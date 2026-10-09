@@ -1,0 +1,13 @@
+{
+ "entries": [
+  {
+   "title": "Odalys Brennick committee date",
+   "body": "Odalys Brennick meets the allotment committee on the 3rd of April and still wants the corner allotment by the willow hedge. Kept quiet until then.",
+   "tags": ["odalys-brennick", "allotment"]
+  }
+ ],
+ "claims": [
+  {"kind": "specific", "subject": "Odalys Brennick", "predicate": "meets the allotment committee on", "object": "the 3rd of April", "date": "2025-03-05", "quote": "Odalys Brennick meets the allotment committee on the 3rd of April.", "line": 1}
+ ],
+ "relations": []
+}

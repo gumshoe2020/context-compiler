@@ -1,0 +1,34 @@
+[package]
+name = "palace-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+palace-judge.workspace = true
+palace-mempalace.workspace = true
+serde.workspace = true
+palace-core.workspace = true
+palace-store.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+
+[features]
+default = ["doctors", "owner-defaults"]
+# The acceptance doctors (`palace doctor --acceptance …`), the test kit they run, the tests that
+# read the fixtures and the checkout paths they default to. Off in the release build
+# (dist/build-release.sh): the doctors carry the owner's fixture text, and an installed binary
+# has no checkout. Their modules (src/doctors/) are private, never
+# exported (PUB-1a item 3): build.rs sets `cfg(doctors)` only when this feature is on and
+# src/doctors/mod.rs exists, so a tree without them builds and tests without doctors.
+doctors = []
+# The owner's names, if compiled in (palace-core's build.rs: $PALACE_OWNER_PERSON and
+# $PALACE_OWNER_ASSISTANT, else the private tree's dev/owner-defaults), as the default --person
+# and --assistant. Off in the release build, and without owner names: there every command that
+# may record or check a role needs both flags (PKG-1.3 item 4, PUB-1a item 2).
+owner-defaults = []
+
+[[bin]]
+name = "palace"
+path = "src/main.rs"

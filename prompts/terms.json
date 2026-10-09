@@ -1,0 +1,11 @@
+{
+  "about": "M4d item 8 (SPEC §2.4, §4): predicate → the verbs a claim's quote may use for it. A claim whose predicate is listed and whose quote uses none of its verbs (nor the predicate itself) is a vocabulary_gap finding. Editable: add a synonym here rather than coining a word when the lexicon already says it.",
+  "predicates": {
+    "supports": ["supports", "support", "backs", "confirms", "endorses", "reinforces", "argues for", "agrees with"],
+    "contradicts": ["contradicts", "refutes", "reverses", "corrects", "disputes", "overturns", "rejects"],
+    "depends_on": ["depends on", "relies on", "requires", "needs", "builds on", "is built on", "was built on"],
+    "bounded_by": ["bounded by", "limited by", "constrained by", "capped by", "within", "only if"],
+    "analogous_to": ["like", "analogous to", "parallels", "mirrors", "resembles", "similar to"],
+    "anti_analogous_to": ["unlike", "contrasts with", "differs from", "opposite of", "not like"]
+  }
+}

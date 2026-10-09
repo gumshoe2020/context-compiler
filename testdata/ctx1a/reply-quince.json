@@ -1,0 +1,13 @@
+{
+ "entries": [
+  {
+   "title": "Quince press repair",
+   "body": "The quince press at the cider barn needs a new screw thread; Fennick Rowe can machine one at his workshop. No rush before the quince harvest.",
+   "tags": ["quince-press", "cider-barn"]
+  }
+ ],
+ "claims": [
+  {"kind": "concept", "subject": "quince press", "predicate": "needs", "object": "a new screw thread", "date": "2025-03-03", "quote": "needs a new screw thread", "line": 1}
+ ],
+ "relations": []
+}

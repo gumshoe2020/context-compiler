@@ -1,0 +1,14 @@
+{
+ "entries": [
+  {
+   "title": "Quillon backup job fixed",
+   "body": "The Quillon backup job was fixed; it runs nightly at two again.",
+   "tags": [
+    "quillon",
+    "backups"
+   ]
+  }
+ ],
+ "claims": [],
+ "relations": []
+}

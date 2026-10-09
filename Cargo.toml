@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.89"
+
+[workspace.dependencies]
+palace-judge = { version = "0.1.0", path = "crates/palace-judge" }
+palace-core = { version = "0.1.0", path = "crates/palace-core" }
+palace-store = { version = "0.1.0", path = "crates/palace-store" }
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.38", features = ["bundled"] }
+clap = { version = "4", default-features = false, features = ["derive", "std", "help", "usage", "error-context", "suggestions"] }
+tempfile = "3"
+palace-mempalace = { version = "0.1.0", path = "crates/palace-mempalace" }

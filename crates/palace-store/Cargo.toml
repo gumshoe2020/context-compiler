@@ -1,0 +1,17 @@
+[package]
+name = "palace-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+palace-core.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+
+[features]
+encrypted-store = []
+
+[dev-dependencies]
+tempfile.workspace = true

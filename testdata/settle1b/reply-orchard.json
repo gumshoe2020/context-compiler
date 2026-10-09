@@ -1,0 +1,33 @@
+{
+ "entries": [
+  {
+   "title": "Orchard tasting surprise",
+   "body": "Pell Arkwright asked to move the orchard tasting to Saturday and is bringing pear cider from the north rows. It is a surprise for Pell's sister, so it stays private.",
+   "tags": [
+    "orchard",
+    "pell-arkwright"
+   ]
+  }
+ ],
+ "claims": [
+  {
+   "kind": "specific",
+   "subject": "orchard tasting",
+   "predicate": "moves to",
+   "object": "Saturday",
+   "date": "2031-04-06",
+   "quote": "move the orchard tasting to Saturday",
+   "line": 1
+  },
+  {
+   "kind": "specific",
+   "subject": "Pell Arkwright",
+   "predicate": "is bringing",
+   "object": "pear cider from the north rows",
+   "date": "2031-04-06",
+   "quote": "pear cider from the north rows",
+   "line": 3
+  }
+ ],
+ "relations": []
+}

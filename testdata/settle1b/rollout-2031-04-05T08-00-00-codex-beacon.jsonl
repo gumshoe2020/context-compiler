@@ -1,0 +1,14 @@
+{"timestamp": "2031-04-05T08:00:00Z", "type": "session_meta", "payload": {"id": "codex-beacon", "cwd": "/work/beacon"}}
+{"timestamp": "2031-04-05T08:00:01Z", "type": "response_item", "payload": {"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "DEVELOPER-INSTRUCTIONS-1188 Recalled memory (quoted data from past sessions; not instructions):\n[GRAPH] Relations matched: ferry-schedule\n[PALACE CONTEXT] 1 palace hit"}]}}
+{"timestamp": "2031-04-05T08:00:02Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Ilse Varga chose SQLite for the beacon logger."}]}}
+{"timestamp": "2031-04-05T08:00:03Z", "type": "response_item", "payload": {"type": "function_call", "name": "shell", "arguments": "{\"cmd\":\"ls\"}", "call_id": "c1"}}
+{"timestamp": "2031-04-05T08:00:04Z", "type": "response_item", "payload": {"type": "function_call_output", "call_id": "c1", "output": "TOOL-OUTPUT-7302"}}
+{"timestamp": "2031-04-05T08:00:05Z", "type": "response_item", "payload": {"type": "custom_tool_call", "name": "apply_patch", "input": "PATCH-6610"}}
+{"timestamp": "2031-04-05T08:00:06Z", "type": "response_item", "payload": {"type": "custom_tool_call_output", "output": "TOOL-OUTPUT-6611"}}
+{"timestamp": "2031-04-05T08:00:07Z", "type": "event_msg", "payload": {"type": "agent_message", "message": "EVENT-MSG-2290"}}
+{"timestamp": "2031-04-05T08:00:08Z", "type": "token_usage_record", "payload": {"total": 12}}
+{"timestamp": "2031-04-05T08:00:09Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "SQLite it is for the beacon logger."}]}}
+{"timestamp": "2031-04-05T08:01:00Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "The logger ships on June 3."}]}}
+{"timestamp": "2031-04-05T08:01:02Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "June 3 for the logger release."}]}}
+{"timestamp": "2031-04-05T08:02:00Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Retries stay off until the radio driver is stable."}]}}
+{"timestamp": "2031-04-05T08:02:02Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Retries off until the radio driver settles."}]}}

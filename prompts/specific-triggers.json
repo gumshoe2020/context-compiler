@@ -1,0 +1,13 @@
+{
+  "_about": "CTX-1 §2: when a message asks for a specific (palace context --layered, block [SPECIFICS]). Read on every turn, so edits apply without a rebuild. Matching is on lowercase words (letters, digits, apostrophes; a curly apostrophe counts as a straight one). 'phrases' match anywhere; inside a phrase '…' stands for one to six words. 'question_words' count only as the first word of a sentence or in a message holding a '?'. 'check_phrases' count only when the message also names a date or a number (a digit, a month or a weekday). The specifics are then shown only when the message also names an entity that has a live specific.",
+  "phrases": [
+    "what time", "what date", "which day", "what day",
+    "how many", "how much", "how long", "how old",
+    "what's the number", "what's the address", "what's the name", "what's the date", "what's the price", "what's the cost",
+    "what is the number", "what is the address", "what is the name", "what is the date", "what is the price", "what is the cost",
+    "what did … say", "what did … decide", "what did … choose", "what did … agree",
+    "remind me", "what was", "did we", "did i", "have we"
+  ],
+  "question_words": ["when", "who", "where"],
+  "check_phrases": ["was it", "is it", "was that", "is that", "wasn't it", "isn't it"]
+}

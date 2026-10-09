@@ -1,0 +1,31 @@
+{
+ "entries": [
+  {
+   "title": "Larkspur ferry inspection",
+   "body": "The Larkspur ferry inspection is on May 14 and the crew budget is 3,200 crowns.",
+   "tags": [
+    "larkspur-ferry"
+   ]
+  }
+ ],
+ "claims": [
+  {
+   "kind": "specific",
+   "subject": "Larkspur ferry inspection",
+   "predicate": "is scheduled on",
+   "object": "May 14",
+   "date": "2031-04-02",
+   "line": 1
+  },
+  {
+   "kind": "specific",
+   "subject": "inspection crew",
+   "predicate": "has budget",
+   "object": "3,200 crowns",
+   "date": "2031-04-02",
+   "quote": "budget of three thousand two hundred",
+   "line": 4
+  }
+ ],
+ "relations": []
+}

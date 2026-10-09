@@ -1,0 +1,5 @@
+[database]
+path = ".cargo-home/advisory-dbs/advisory-db-3157b0e258782691"
+fetch = false
+stale = false
+

@@ -1,0 +1,40 @@
+{
+ "entries": [
+  {
+   "title": "Harvest supper at the mill",
+   "body": "Brannoch Lees hosts the harvest supper at the mill on October 18 and brings the long tables from the chapel hall; the menu stays simple (soup, bread, one roast) because the mill kitchen fits two cooks.",
+   "tags": [
+    "harvest-supper",
+    "brannoch-lees"
+   ]
+  }
+ ],
+ "claims": [
+  {
+   "kind": "specific",
+   "subject": "harvest supper",
+   "predicate": "is held on",
+   "object": "October 18",
+   "date": "2031-05-10",
+   "quote": "host the harvest supper at the mill on October 18",
+   "line": 1
+  },
+  {
+   "kind": "concept",
+   "subject": "harvest supper menu",
+   "predicate": "stays",
+   "object": "simple, because the mill kitchen fits two cooks",
+   "date": "2031-05-10",
+   "line": 3
+  }
+ ],
+ "relations": [
+  {
+   "subject": "Brannoch Lees",
+   "predicate": "hosts",
+   "object": "harvest supper",
+   "confidence": 0.9,
+   "line": 1
+  }
+ ]
+}

@@ -1,0 +1,6 @@
+{"ts": "2025-03-02T09:00:00Z", "role": "user", "text": "The Tern harbour survey boat leaves Kelbrook on the 19th of March."}
+{"ts": "2025-03-02T09:00:10Z", "role": "assistant", "text": "Noted: the survey boat leaves Kelbrook on the 19th of March."}
+{"ts": "2025-03-02T09:01:00Z", "role": "user", "text": "Corin Dask checks the soundings on the 21st, two days later."}
+{"ts": "2025-03-02T09:01:05Z", "role": "assistant", "text": "Corin checks the soundings on the 21st."}
+{"ts": "2025-03-02T09:02:00Z", "role": "user", "text": "The boat hire costs 1,450 crowns for the week."}
+{"ts": "2025-03-02T09:02:05Z", "role": "assistant", "text": "1,450 crowns for the week, noted."}

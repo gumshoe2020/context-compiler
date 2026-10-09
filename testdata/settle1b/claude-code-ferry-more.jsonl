@@ -1,0 +1,7 @@
+{"type": "user", "timestamp": "2031-04-03T10:00:00Z", "sessionId": "cc-ferry-0001", "uuid": "2031-04-03T10:00:00Z", "message": {"role": "user", "content": "Change of plan: the Larkspur ferry inspection moves to May 21."}}
+{"type": "assistant", "timestamp": "2031-04-03T10:00:04Z", "sessionId": "cc-ferry-0001", "uuid": "2031-04-03T10:00:04Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Updated: the inspection is on May 21."}, {"type": "tool_use", "id": "t2", "name": "Edit", "input": {}}]}}
+{"type": "user", "timestamp": "2031-04-03T10:00:05Z", "sessionId": "cc-ferry-0001", "uuid": "2031-04-03T10:00:05Z", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t2", "content": "TOOL-OUTPUT-5521 edited"}]}}
+{"type": "user", "timestamp": "2031-04-03T10:01:00Z", "sessionId": "cc-ferry-0001", "uuid": "2031-04-03T10:01:00Z", "message": {"role": "user", "content": "Wenna confirmed the new date."}}
+{"type": "assistant", "timestamp": "2031-04-03T10:01:02Z", "sessionId": "cc-ferry-0001", "uuid": "2031-04-03T10:01:02Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Good, Wenna confirmed May 21."}]}}
+{"type": "user", "timestamp": "2031-04-03T10:02:00Z", "sessionId": "cc-ferry-0001", "uuid": "2031-04-03T10:02:00Z", "message": {"role": "user", "content": "That is all for today."}}
+{"type": "assistant", "timestamp": "2031-04-03T10:02:02Z", "sessionId": "cc-ferry-0001", "uuid": "2031-04-03T10:02:02Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Talk soon."}]}}

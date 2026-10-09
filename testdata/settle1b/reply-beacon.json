@@ -1,0 +1,50 @@
+{
+ "entries": [
+  {
+   "title": "Beacon logger storage",
+   "body": "Ilse Varga chose SQLite for the beacon logger, which ships on June 3. Retries stay off until the radio driver is stable.",
+   "tags": [
+    "beacon-logger",
+    "ilse-varga"
+   ]
+  }
+ ],
+ "claims": [
+  {
+   "kind": "specific",
+   "subject": "Ilse Varga",
+   "predicate": "chose",
+   "object": "SQLite for the beacon logger",
+   "date": "2031-04-05",
+   "quote": "Ilse Varga chose SQLite for the beacon logger",
+   "line": 1
+  },
+  {
+   "kind": "specific",
+   "subject": "beacon logger",
+   "predicate": "ships on",
+   "object": "June 3",
+   "date": "2031-04-05",
+   "quote": "The logger ships on June 3",
+   "line": 3
+  },
+  {
+   "kind": "concept",
+   "subject": "beacon logger",
+   "predicate": "keeps",
+   "object": "retries off until the radio driver is stable",
+   "date": "2031-04-05",
+   "quote": "Retries stay off until the radio driver is stable",
+   "line": 5
+  }
+ ],
+ "relations": [
+  {
+   "subject": "Ilse Varga",
+   "predicate": "decided",
+   "object": "beacon logger storage",
+   "confidence": 0.8,
+   "line": 1
+  }
+ ]
+}

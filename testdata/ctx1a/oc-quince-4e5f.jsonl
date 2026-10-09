@@ -1,0 +1,6 @@
+{"ts": "2025-03-03T10:00:00Z", "role": "user", "text": "The quince press at the cider barn needs a new screw thread."}
+{"ts": "2025-03-03T10:00:10Z", "role": "assistant", "text": "A new screw thread for the quince press, noted."}
+{"ts": "2025-03-03T10:01:00Z", "role": "user", "text": "Fennick Rowe can machine one at his workshop."}
+{"ts": "2025-03-03T10:01:05Z", "role": "assistant", "text": "Fennick Rowe machines the thread."}
+{"ts": "2025-03-03T10:02:00Z", "role": "user", "text": "No rush, the quince harvest is months away."}
+{"ts": "2025-03-03T10:02:05Z", "role": "assistant", "text": "Understood, no rush."}

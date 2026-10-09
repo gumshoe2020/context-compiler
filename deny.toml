@@ -1,0 +1,12 @@
+[advisories]
+db-path = ".cargo-home/advisory-dbs"
+[licenses]
+allow = ["MIT", "Apache-2.0", "Unicode-3.0", "Zlib"]
+[bans]
+# Restored to "deny" 2026-09-25: the tract-onnx tree that forced "warn" on 2026-09-22 left main at M3c;
+# duplicate-version count is 0. A future duplicate is a logged decision, not a policy edit.
+multiple-versions = "deny"
+wildcards = "deny"
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

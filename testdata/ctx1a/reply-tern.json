@@ -1,0 +1,18 @@
+{
+ "entries": [
+  {
+   "title": "Tern harbour survey date",
+   "body": "The Tern harbour survey boat leaves Kelbrook on the 19th of March. Corin Dask checks the soundings on the 21st. The boat hire costs 1,450 crowns for the week.",
+   "tags": ["tern-harbour", "survey"]
+  }
+ ],
+ "claims": [
+  {"kind": "specific", "subject": "Tern harbour survey boat", "predicate": "leaves Kelbrook on", "object": "the 19th of March", "date": "2025-03-02", "quote": "The Tern harbour survey boat leaves Kelbrook on the 19th of March.", "line": 1},
+  {"kind": "specific", "subject": "Corin Dask", "predicate": "checks the soundings on", "object": "the 21st", "date": "2025-03-02", "quote": "Corin Dask checks the soundings on the 21st", "line": 3},
+  {"kind": "specific", "subject": "Tern harbour survey boat hire", "predicate": "costs", "object": "1,450 crowns for the week", "date": "2025-03-02", "quote": "The boat hire costs 1,450 crowns for the week.", "line": 5}
+ ],
+ "relations": [
+  {"subject": "tern-harbour-survey", "predicate": "run_by", "object": "ysolde-varkas", "confidence": 0.9, "line": 1},
+  {"subject": "tern-harbour-survey", "predicate": "checked_by", "object": "corin-dask", "confidence": 0.85, "line": 3}
+ ]
+}

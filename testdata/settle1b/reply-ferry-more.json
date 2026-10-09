@@ -1,0 +1,24 @@
+{
+ "entries": [
+  {
+   "title": "Larkspur ferry inspection moved",
+   "body": "The Larkspur ferry inspection moved from May 14 to May 21; Wenna Ostrow confirmed the new date.",
+   "tags": [
+    "larkspur-ferry",
+    "inspection"
+   ]
+  }
+ ],
+ "claims": [
+  {
+   "kind": "specific",
+   "subject": "Larkspur ferry inspection",
+   "predicate": "is scheduled on",
+   "object": "May 21",
+   "date": "2031-04-03",
+   "quote": "inspection moves to May 21",
+   "line": 8
+  }
+ ],
+ "relations": []
+}

@@ -1,0 +1,95 @@
+{
+ "entries": [
+  {
+   "title": "Beacon logger design notes",
+   "body": "Ilse Varga chose SQLite for the beacon logger; the release keeps a small scope; retries stay off until the radio driver is stable, the main source of instability.",
+   "tags": [
+    "beacon-logger",
+    "design"
+   ]
+  }
+ ],
+ "claims": [
+  {
+   "kind": "concept",
+   "subject": "beacon logger",
+   "predicate": "stores readings in",
+   "object": "SQLite rather than flat files",
+   "date": "2031-04-05",
+   "line": 1
+  },
+  {
+   "kind": "concept",
+   "subject": "Ilse Varga",
+   "predicate": "owns",
+   "object": "the beacon logger's storage decision",
+   "date": "2031-04-05",
+   "line": 1
+  },
+  {
+   "kind": "concept",
+   "subject": "beacon logger",
+   "predicate": "favours",
+   "object": "a single-file store that is easy to copy",
+   "date": "2031-04-05",
+   "line": 2
+  },
+  {
+   "kind": "concept",
+   "subject": "beacon logger release",
+   "predicate": "is bound to",
+   "object": "the June schedule",
+   "date": "2031-04-05",
+   "line": 3
+  },
+  {
+   "kind": "concept",
+   "subject": "release plan",
+   "predicate": "keeps",
+   "object": "the scope small for the first ship",
+   "date": "2031-04-05",
+   "line": 4
+  },
+  {
+   "kind": "concept",
+   "subject": "beacon logger",
+   "predicate": "keeps",
+   "object": "retries off until the radio driver is stable",
+   "date": "2031-04-05",
+   "line": 5
+  },
+  {
+   "kind": "concept",
+   "subject": "radio driver",
+   "predicate": "is",
+   "object": "the main source of instability",
+   "date": "2031-04-05",
+   "line": 5
+  },
+  {
+   "kind": "concept",
+   "subject": "retry policy",
+   "predicate": "waits on",
+   "object": "a stable radio driver",
+   "date": "2031-04-05",
+   "line": 6
+  },
+  {
+   "kind": "concept",
+   "subject": "beacon team",
+   "predicate": "prefers",
+   "object": "simple storage over clever storage",
+   "date": "2031-04-05",
+   "line": 2
+  },
+  {
+   "kind": "concept",
+   "subject": "beacon logger",
+   "predicate": "treats",
+   "object": "dropped readings as acceptable during driver work",
+   "date": "2031-04-05",
+   "line": 6
+  }
+ ],
+ "relations": []
+}

@@ -1,0 +1,51 @@
+{
+ "entries": [
+  {
+   "title": "Larkspur ferry inspection",
+   "body": "Tobiah Quell moved the Larkspur ferry inspection to May 14. Wenna Ostrow leads the inspection crew, whose budget is 3,200 crowns. Paper logbooks stay on the ferry because the deck tablets fog up.",
+   "tags": [
+    "larkspur-ferry",
+    "inspection",
+    "wenna-ostrow"
+   ]
+  }
+ ],
+ "claims": [
+  {
+   "kind": "specific",
+   "subject": "Larkspur ferry inspection",
+   "predicate": "is scheduled on",
+   "object": "May 14",
+   "date": "2031-04-02",
+   "quote": "Larkspur ferry inspection to May 14",
+   "line": 1
+  },
+  {
+   "kind": "specific",
+   "subject": "inspection crew",
+   "predicate": "has budget",
+   "object": "3,200 crowns",
+   "date": "2031-04-02",
+   "quote": "The crew budget is 3,200 crowns",
+   "line": 4
+  },
+  {
+   "kind": "concept",
+   "subject": "ferry crew",
+   "predicate": "keeps",
+   "object": "paper logbooks because deck tablets fog up",
+   "date": "2031-04-02",
+   "quote": "the deck tablets fog up",
+   "line": 6
+  }
+ ],
+ "relations": [
+  {
+   "subject": "Wenna Ostrow",
+   "predicate": "leads",
+   "object": "Larkspur inspection crew",
+   "confidence": 0.85,
+   "line": 3
+  }
+ ]
+}
