@@ -1,5 +1,8 @@
 //! SETTLE-1b (spec §3–§4): the distill prompt, and the model's structured reply checked against
-//! the palace copy it was given. Pure: no file, model or store here.
+//! the palace copy it was given. Pure: no file, model or store here. SETTLE-1d §5: the prompt
+//! ends with the values the conversation carries (`checklist`), and the reply names the values it
+//! did not file as a specific in `skipped`, each with a known reason.
+use crate::recall_values::{CommonWords, prose, values};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -41,6 +44,56 @@ pub struct DistilledClaim {
     /// For a demoted `specific` (spec §4.4): why it was written as a `concept`.
     pub demoted: Option<String>,
 }
+/// A listed value the reply did not file as a specific, and why (SETTLE-1d §5).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Skip {
+    pub line: usize,
+    pub value: String,
+    pub reason: String,
+}
+/// The reasons a value may be skipped for.
+pub const SKIP_REASONS: [&str; 5] = [
+    "trivia",
+    "illustrative",
+    "hypothetical",
+    "superseded",
+    "chatter",
+];
+/// At most this many lines in the values checklist, earliest first.
+pub const CHECKLIST_LINES: usize = 60;
+
+/// The values checklist: each line of the conversation that carries values (`recall::values`
+/// over the sentences of its prose, code dropped first, each value once), earliest first, at most
+/// [`CHECKLIST_LINES`].
+pub fn checklist(lines: &[CopyLine], common: &CommonWords) -> Vec<(usize, Vec<String>)> {
+    lines
+        .iter()
+        .filter_map(|l| {
+            let mut found: Vec<String> = Vec::new();
+            for sentence in crate::recall::sentences(&prose(&l.text)) {
+                for v in values(&sentence, common) {
+                    if !found.iter().any(|f| f.to_lowercase() == v.to_lowercase()) {
+                        found.push(v);
+                    }
+                }
+            }
+            (!found.is_empty()).then_some((l.line, found))
+        })
+        .take(CHECKLIST_LINES)
+        .collect()
+}
+/// The block appended to the prompt (nothing when the conversation carries no value).
+pub fn checklist_block(list: &[(usize, Vec<String>)]) -> String {
+    if list.is_empty() {
+        return String::new();
+    }
+    let mut block = String::from("\nVALUES IN THIS CONVERSATION (line: values)\n");
+    for (line, values) in list {
+        block.push_str(&format!("L{line}: {}\n", values.join(", ")));
+    }
+    block
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct DistilledRelation {
     pub subject: String,
@@ -54,19 +107,22 @@ pub struct Reply {
     pub entries: Vec<DistilledEntry>,
     pub claims: Vec<DistilledClaim>,
     pub relations: Vec<DistilledRelation>,
+    pub skipped: Vec<Skip>,
 }
 
 /// The reply checked: what passed, the shape problems (any one fails the reply: retried once),
-/// and the claims marked `specific` whose quote is missing or not in the copy (spec §4.4).
+/// the claims marked `specific` whose quote is missing or not in the copy (spec §4.4), and the
+/// `skipped` items rejected (an unknown reason, a line outside the conversation: SETTLE-1d §5).
 #[derive(Debug, Default)]
 pub struct Checked {
     pub reply: Reply,
     pub problems: Vec<String>,
     pub unquoted_specifics: Vec<usize>,
+    pub bad_skips: Vec<String>,
 }
 impl Checked {
     pub fn passed(&self) -> bool {
-        self.problems.is_empty() && self.unquoted_specifics.is_empty()
+        self.problems.is_empty() && self.unquoted_specifics.is_empty() && self.bad_skips.is_empty()
     }
 }
 
@@ -112,6 +168,12 @@ pub fn check(answer: &str, lines: &[CopyLine]) -> Checked {
         match relation(r, &by_line) {
             Ok(relation) => checked.reply.relations.push(relation),
             Err(why) => checked.problems.push(format!("relation {i}: {why}")),
+        }
+    }
+    for (i, k) in items(&value, "skipped").iter().enumerate() {
+        match skip(k, &by_line) {
+            Ok(skip) => checked.reply.skipped.push(skip),
+            Err(why) => checked.bad_skips.push(format!("skipped {i}: {why}")),
         }
     }
     let stated = !checked.reply.claims.is_empty() || !checked.reply.relations.is_empty();
@@ -209,6 +271,20 @@ fn relation(value: &Value, by_line: &BTreeMap<usize, &str>) -> Result<DistilledR
         line: line_of(value, by_line)?,
     })
 }
+fn skip(value: &Value, by_line: &BTreeMap<usize, &str>) -> Result<Skip, String> {
+    let reason = text(value, "reason")?;
+    if !SKIP_REASONS.contains(&reason.as_str()) {
+        return Err(format!(
+            "reason {reason:?} is not one of {}",
+            SKIP_REASONS.join("|")
+        ));
+    }
+    Ok(Skip {
+        line: line_of(value, by_line)?,
+        value: text(value, "value")?,
+        reason,
+    })
+}
 fn is_date(date: &str) -> bool {
     let b = date.as_bytes();
     b.len() == 10
@@ -230,12 +306,19 @@ pub fn demote_unquoted(checked: &mut Checked) {
     }
 }
 
+/// SETTLE-1d §5: after the retry, `skipped` items still rejected are dropped (their values then
+/// count as unexplained when sampled).
+pub fn drop_bad_skips(checked: &mut Checked) -> Vec<String> {
+    std::mem::take(&mut checked.bad_skips)
+}
+
 /// The reply as logged (the write log keeps it, so a resumed distill writes the same entries).
 pub fn to_json(reply: &Reply) -> Value {
     json!({
         "entries": reply.entries.iter().map(|e| json!({"title":e.title,"body":e.body,"tags":e.tags})).collect::<Vec<_>>(),
         "claims": reply.claims.iter().map(|c| json!({"kind":c.kind,"subject":c.subject,"predicate":c.predicate,"object":c.object,"date":c.date,"quote":c.quote,"line":c.line,"demoted":c.demoted})).collect::<Vec<_>>(),
         "relations": reply.relations.iter().map(|r| json!({"subject":r.subject,"predicate":r.predicate,"object":r.object,"confidence":r.confidence,"line":r.line})).collect::<Vec<_>>(),
+        "skipped": reply.skipped.iter().map(|k| json!({"line":k.line,"value":k.value,"reason":k.reason})).collect::<Vec<_>>(),
     })
 }
 /// The logged reply read back (already checked when it was logged).
@@ -275,6 +358,14 @@ pub fn from_json(value: &Value) -> Reply {
                 object: s(r, "object"),
                 confidence: r["confidence"].as_f64().unwrap_or(0.0),
                 line: line(r),
+            })
+            .collect(),
+        skipped: items(value, "skipped")
+            .iter()
+            .map(|k| Skip {
+                line: line(k),
+                value: s(k, "value"),
+                reason: s(k, "reason"),
             })
             .collect(),
     }
@@ -317,6 +408,41 @@ mod tests {
         assert_eq!(from_json(&to_json(&checked.reply)), checked.reply);
     }
     #[test]
+    fn the_checklist_lists_value_lines_earliest_first() {
+        let common = CommonWords::parse(r#"{"w":["Noted"]}"#).unwrap();
+        let mut lines = copy();
+        lines.push(CopyLine {
+            line: 6,
+            role: "user".into(),
+            text: "thanks, see you".into(),
+        });
+        let list = checklist(&lines, &common);
+        assert_eq!(
+            list,
+            [
+                (4, vec!["Theo".to_owned(), "24th".to_owned()]),
+                (5, vec!["24th".to_owned()])
+            ]
+        );
+        assert_eq!(
+            checklist_block(&list),
+            "\nVALUES IN THIS CONVERSATION (line: values)\nL4: Theo, 24th\nL5: 24th\n"
+        );
+        assert_eq!(checklist_block(&[]), "");
+        let many: Vec<CopyLine> = (1..=70)
+            .map(|line| CopyLine {
+                line,
+                role: "user".into(),
+                text: format!("Day {line}0."),
+            })
+            .collect();
+        let list = checklist(&many, &common);
+        assert_eq!(
+            (list.len(), list[0].0, list[59].0),
+            (CHECKLIST_LINES, 1, 60)
+        );
+    }
+    #[test]
     fn shape_problems_and_unquoted_specifics() {
         let answer = r#"{"entries":[{"title":"","body":"b","tags":[]}],
             "claims":[{"kind":"specific","subject":"Ravi","predicate":"swaps","object":"x","date":"2026-10-06","quote":"not there","line":4},
@@ -329,6 +455,17 @@ mod tests {
         assert_eq!(checked.reply.claims[0].kind, "concept");
         assert!(checked.reply.claims[0].demoted.is_some());
         assert!(!check("no json", &copy()).passed());
+        let skips = r#"{"entries":[],"claims":[],"relations":[],"skipped":[
+            {"line":4,"value":"24th","reason":"trivia"},{"line":5,"value":"Theo","reason":"boring"},
+            {"line":9,"value":"x","reason":"chatter"}]}"#;
+        let mut checked = check(skips, &copy());
+        assert!(!checked.passed());
+        assert_eq!(checked.reply.skipped.len(), 1);
+        assert_eq!(checked.bad_skips.len(), 2, "{:?}", checked.bad_skips);
+        assert!(checked.bad_skips[0].contains("\"boring\" is not one of trivia|"));
+        assert_eq!(drop_bad_skips(&mut checked).len(), 2);
+        assert!(checked.passed());
+        assert_eq!(from_json(&to_json(&checked.reply)), checked.reply);
         assert!(check(r#"{"entries":[],"claims":[],"relations":[]}"#, &copy()).passed());
     }
 }

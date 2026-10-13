@@ -1,6 +1,11 @@
 //! M5b-10 item 2: a rollup whose only problems are problems of claim lines is repaired, not
 //! rewritten. Pure: which attempt comes next, the repair prompt, and the splice of the corrected
 //! lines into the first body (every other line unchanged, byte for byte).
+/// SETTLE-1h §1: a cited live specific's missing value, quoted after its handle before
+/// re-validation.
+pub use crate::rollup_cited::{Mend, mend as mend_cited_values};
+/// SETTLE-1f §1: a near-miss of the referenced entries' layout, mended before validation.
+pub use crate::rollup_layout::mend as mend_layout;
 use crate::{
     claim::{self, Claim},
     quote_relevance::distinctive_anchors,

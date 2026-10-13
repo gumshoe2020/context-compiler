@@ -1,0 +1,16 @@
+{
+ "entries": [
+  {
+   "title": "Night shift swap",
+   "body": "Priya and Tomas swap: Priya takes the 24th.",
+   "tags": ["night-shift", "priya", "tomas"]
+  }
+ ],
+ "claims": [
+  {"kind": "specific", "subject": "Priya", "predicate": "swaps with", "object": "Tomas, taking the 24th", "date": "@YEAR@-10-09", "quote": "Priya takes the 24th", "line": 3}
+ ],
+ "relations": [],
+ "skipped": [
+  {"line": 4, "value": "10/17", "reason": "trivia"}
+ ]
+}

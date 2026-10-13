@@ -1,0 +1,52 @@
+{
+  "_about": "SETTLE-1d §1: capitalized words that are never counted as names by the specifics measure (recall::values: palace fidelity, and the values checklist of palace distill). Read on every run from the --prompts directory, so edits apply without a rebuild. Matching is case-insensitive, with curly apostrophes read as straight ones and a trailing 's dropped. Every list below is merged; the grouping is only for the reader. Month and weekday names are NOT here: they stay values.",
+  "pronouns": [
+    "I", "I'm", "I'll", "I've", "I'd", "Me", "My", "Mine", "Myself",
+    "You", "You're", "You'll", "You've", "You'd", "Your", "Yours", "Yourself",
+    "He", "He's", "He'll", "He'd", "Him", "His", "Himself",
+    "She", "She's", "She'll", "She'd", "Her", "Hers", "Herself",
+    "It", "It's", "It'll", "It'd", "Its", "Itself",
+    "We", "We're", "We'll", "We've", "We'd", "Us", "Our", "Ours", "Ourselves",
+    "They", "They're", "They'll", "They've", "They'd", "Them", "Their", "Theirs", "Themselves",
+    "That", "That's", "That'll", "That'd", "This", "These", "Those",
+    "There", "There's", "There'll", "Here", "Here's",
+    "What", "What's", "Which", "Who", "Who's", "Whom", "Whose", "When", "When's", "Where", "Where's", "Why", "How", "How's",
+    "Let's", "Someone", "Something", "Somebody", "Anyone", "Anything", "Everyone", "Everything", "Nothing", "Nobody", "None"
+  ],
+  "determiners": [
+    "A", "An", "The", "Some", "Any", "Each", "Every", "Either", "Neither", "No", "All", "Both",
+    "Few", "Many", "Much", "More", "Most", "Less", "Least", "Several", "Other", "Another", "Such",
+    "Same", "One", "Two", "Three", "First", "Second", "Third", "Last", "Next"
+  ],
+  "conjunctions_and_prepositions": [
+    "And", "But", "Or", "Nor", "So", "Yet", "For", "If", "Then", "Than", "Because", "Since",
+    "Although", "Though", "While", "Whereas", "Unless", "Until", "Till", "Once", "As", "Whether",
+    "At", "By", "In", "On", "Of", "To", "From", "With", "Without", "Into", "Onto", "Over", "Under",
+    "About", "After", "Before", "During", "Between", "Through", "Per", "Via", "Like", "Unlike", "Up", "Down", "Out", "Off"
+  ],
+  "sentence_adverbs_and_interjections": [
+    "Yes", "Yeah", "Yep", "No", "Nope", "Not", "OK", "Okay", "Ok", "Sure", "Thanks", "Thank", "Please",
+    "Hi", "Hey", "Hello", "Bye", "Goodnight", "Morning", "Evening", "Oh", "Ah", "Hmm", "Wow", "Well",
+    "Also", "Still", "Just", "Only", "Even", "Now", "Today", "Tonight", "Tomorrow", "Yesterday",
+    "Again", "Already", "Always", "Never", "Often", "Sometimes", "Soon", "Later", "Earlier", "Meanwhile",
+    "However", "Otherwise", "Instead", "Anyway", "Besides", "Moreover", "Therefore", "Thus", "Hence",
+    "Actually", "Basically", "Honestly", "Really", "Probably", "Maybe", "Perhaps", "Definitely", "Certainly",
+    "Clearly", "Obviously", "Hopefully", "Unfortunately", "Fortunately", "Finally", "Overall", "Plus",
+    "Good", "Great", "Fine", "Nice", "Right", "Done", "Noted", "Got", "Agreed", "Understood", "Sorry",
+    "Confirmed", "Simpler", "Serious", "AM", "PM",
+    "Note", "Update", "Summary", "Status", "Result", "Results", "Answer", "Question", "Why", "Short", "Long",
+    "Can", "Can't", "Could", "Couldn't", "Would", "Wouldn't", "Should", "Shouldn't", "Will", "Won't",
+    "Shall", "Might", "Must", "Do", "Don't", "Does", "Doesn't", "Did", "Didn't",
+    "Is", "Isn't", "Are", "Aren't", "Was", "Wasn't", "Were", "Weren't", "Be", "Been", "Being",
+    "Have", "Haven't", "Has", "Hasn't", "Had", "Hadn't"
+  ],
+  "imperative_verbs": [
+    "Take", "Offer", "Prove", "Make", "Let", "Go", "Get", "Give", "Keep", "Put", "Run", "Try", "Use",
+    "Check", "Send", "Tell", "Ask", "Call", "Add", "Remove", "Drop", "Move", "Set", "Start", "Stop",
+    "Wait", "Look", "See", "Read", "Write", "Fix", "Build", "Open", "Close", "Pick", "Choose", "Find",
+    "Show", "Bring", "Leave", "Skip", "Follow", "Confirm", "Remember", "Forget", "Consider", "Plan",
+    "Book", "Pay", "Text", "Reply", "Sleep", "Rest", "Eat", "Drink", "Come", "Stay", "Think", "Say",
+    "Swap", "Switch", "Change", "Cancel", "Schedule", "Review", "Test", "Ship", "Push", "Pull", "Merge",
+    "Customize", "Install", "Update", "Enable", "Disable", "Restart"
+  ]
+}

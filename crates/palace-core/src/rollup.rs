@@ -134,6 +134,17 @@ pub fn unpinned_labels(entry: &Entry) -> Vec<String> {
     }
     found
 }
+/// The byte range of a referenced-only label that opens `line` (after spaces, a `-`, `*` or `+`
+/// list marker and `**`), pinned or not (SETTLE-1f §1: what repair may mend).
+pub fn opening_label(line: &str) -> Option<(usize, usize)> {
+    let (start, end) = ref_label(line)?;
+    let before = line[..start].trim_start_matches(' ');
+    let before = before
+        .strip_prefix(['-', '*', '+'])
+        .filter(|r| r.starts_with(' '))
+        .map_or(before, |r| r.trim_start_matches(' '));
+    (before.is_empty() || before == "**").then_some((start, end))
+}
 /// Non-blank blocks separated by blank lines.
 fn paragraphs(section: &str) -> impl Iterator<Item = &str> {
     let mut rest = section;
@@ -379,6 +390,49 @@ fn full_name(bytes: &[u8]) -> bool {
             0..=9 => b.is_ascii_digit(),
             _ => b.is_ascii_hexdigit(),
         })
+}
+/// The diary entries `text` names (a full `<date>-<12 hex>` name, with or without `.md`, or the
+/// 12-hex hash alone), in order, each once.
+pub fn named_entries(text: &str, names: &[String]) -> Vec<String> {
+    resolve_tokens(text, names, &BTreeSet::new()).0
+}
+/// Where `text` names a diary entry, in order: the byte range (a full name with its `.md`, or a
+/// 12-hex hash one of `names` ends with) and the entry. Dangling hashes are not entries.
+pub fn entry_spans(text: &str, names: &[String]) -> Vec<(usize, usize, String)> {
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < text.len() {
+        let rest = &text[i..];
+        let full = full_name(rest.as_bytes());
+        let hash = !full && hash_at(text.as_bytes(), i);
+        let found = if full {
+            let md = rest[23..].to_ascii_lowercase().starts_with(".md");
+            Some((i + 23 + if md { 3 } else { 0 }, rest[..23].to_owned()))
+        } else if hash {
+            let tail = format!("-{}", rest[..12].to_ascii_lowercase());
+            names
+                .iter()
+                .find(|n| n.ends_with(&tail))
+                .map(|n| (i + 12, n.clone()))
+        } else {
+            None
+        };
+        match found {
+            Some((end, name)) => {
+                spans.push((i, end, name));
+                i = end;
+            }
+            None => i += rest.chars().next().map_or(1, char::len_utf8),
+        }
+    }
+    spans
+}
+/// A 12-hex run at `i` with no hex digit or `-` before it and no hex digit after it.
+fn hash_at(bytes: &[u8], i: usize) -> bool {
+    bytes.len() >= i + 12
+        && bytes[i..i + 12].iter().all(u8::is_ascii_hexdigit)
+        && !(i > 0 && (bytes[i - 1].is_ascii_hexdigit() || bytes[i - 1] == b'-'))
+        && !bytes.get(i + 12).is_some_and(u8::is_ascii_hexdigit)
 }
 fn resolve_tokens(
     text: &str,
@@ -692,6 +746,7 @@ mod void_tests {
             thread: "t",
             tags: &[],
             as_of: "2026-09-26",
+            generic: &Default::default(),
         };
         let cluster = rollup_cluster::pull(&d, &NoHits, &request).unwrap();
         assert_eq!(cluster.voided, [VOIDED]);
@@ -725,6 +780,7 @@ mod void_tests {
             thread: "t",
             tags: &[],
             as_of: "2026-09-26",
+            generic: &Default::default(),
         };
         let cluster = rollup_cluster::pull(&d, &NoHits, &request).unwrap();
         let member = cluster.member(referenced).unwrap();
@@ -780,6 +836,7 @@ mod void_tests {
             thread: "t",
             tags: &[],
             as_of: "2026-09-28",
+            generic: &Default::default(),
         };
         let cluster = rollup_cluster::pull(&d, &NoHits, &request).unwrap();
         assert!(cluster.voided.is_empty(), "{:?}", cluster.voided);

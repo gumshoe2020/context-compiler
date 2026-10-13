@@ -1,0 +1,13 @@
+{
+ "entries": [
+  {
+   "title": "Quarry survey: the Hollin mill ledger",
+   "body": "Mira Feldane found the old mill ledger in the loft at Hollin mill, with the quarry carts listed by year; it could date the north quarry workings, and she will copy the cart lists next week.",
+   "tags": ["quarry-survey", "mira-feldane", "hollin-mill"]
+  }
+ ],
+ "claims": [
+  {"kind": "concept", "subject": "Hollin mill ledger", "predicate": "could date", "object": "the north quarry workings", "date": "2031-05-03", "quote": "That ledger could date the north quarry workings for the survey.", "line": 4}
+ ],
+ "relations": []
+}

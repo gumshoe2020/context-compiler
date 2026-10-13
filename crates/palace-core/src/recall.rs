@@ -1,6 +1,7 @@
 //! SETTLE-1b (spec §8): recall at both compression points — the pure parts. Seeded sampling,
-//! the sentences of a transcript that carry values (dates, names, numbers) and the exact-match
-//! test for specifics, the judge's question and verdicts for concepts, and the digest line.
+//! the sentences of a transcript that carry values (dates, names, numbers; SETTLE-1d §1:
+//! `recall_values`) and whether the specifics keep them, the judge's question and verdicts for
+//! concepts, and the digest line.
 use crate::ids::{length_prefixed, sha256};
 use serde_json::Value;
 
@@ -8,6 +9,12 @@ use serde_json::Value;
 pub const SAMPLE: usize = 10;
 /// `FIDELITY_FLOOR`: concept recall below it pages.
 pub const FLOOR: f64 = 0.7;
+/// `DISTILL_SPECIFIC_SAMPLE` (SETTLE-1d §2): value-bearing sentences sampled per distill-point
+/// specifics check.
+pub const DISTILL_SPECIFIC_SAMPLE: usize = 20;
+/// The `judge` of a distill-point specifics row scored per value (SETTLE-1d §2); older rows say
+/// `rule:exact` (per sentence) and are never pooled with these.
+pub const RULE_VALUES: &str = "rule:values";
 /// `DISTILL_RECALL_MIN_WORDS` (SETTLE-1c §1): a distill-point concept sample draws only from
 /// messages with at least this many words.
 pub const DISTILL_MIN_WORDS: usize = 8;
@@ -69,37 +76,9 @@ fn push_sentence(out: &mut Vec<String>, text: &str) {
     }
 }
 
-/// The values a sentence carries: numbers (any word with a digit, e.g. `14`, `3,200`,
-/// `2031-04-02`) and names (capitalized words not first in the sentence, month names included),
-/// each trimmed of surrounding punctuation.
-pub fn values(sentence: &str) -> Vec<String> {
-    let mut found = Vec::new();
-    for (index, raw) in sentence.split_whitespace().enumerate() {
-        let word = raw.trim_matches(|c: char| !c.is_alphanumeric());
-        let word = word.strip_suffix("'s").unwrap_or(word);
-        if word.is_empty() {
-            continue;
-        }
-        let number = word.chars().any(|c| c.is_ascii_digit());
-        let name = index > 0 && word != "I" && word.chars().next().is_some_and(char::is_uppercase);
-        if (number || name) && !found.iter().any(|f| f == word) {
-            found.push(word.to_owned());
-        }
-    }
-    found
-}
-
-/// A sampled sentence is `supported` when every value it carries is verbatim in the text of the
-/// specifics (their subjects, objects and quotes), else `missing`. No judge.
-pub fn specific_verdict(sentence: &str, specifics_text: &str) -> &'static str {
-    match values(sentence)
-        .iter()
-        .all(|v| specifics_text.contains(v.as_str()))
-    {
-        true => "supported",
-        false => "missing",
-    }
-}
+pub use crate::recall_values::{
+    CommonWords, Day, Specifics, kept_values, prose, specific_verdict, values,
+};
 
 /// A judge's answer as a recall verdict: `supported`, `missing` or `contradicted` (the watch's
 /// `preserved`/`reversed`/`unclear` read as the first, third and second).
@@ -135,6 +114,9 @@ pub const FOLLOWING_CHARS: usize = 4000;
 /// The distill-point verdict of a statement with no lasting content: kept in the row's items,
 /// left out of `sampled`.
 pub const NOT_APPLICABLE: &str = "not_applicable";
+/// The consolidation verdict of a referenced entry's specific the rollup neither keeps nor cites
+/// (SETTLE-1d §6): kept in the row's items, left out of `sampled`, never `missing`.
+pub const DEFERRED: &str = "deferred";
 
 /// The messages after the sampled one as the distill-point question shows them: up to `n`, one
 /// per line, at most [`FOLLOWING_CHARS`] characters in all.
@@ -157,7 +139,7 @@ pub fn distill_question(statement: &str, following: &str, text: &str) -> String 
         DISTILL_RULES
     )
 }
-const DISTILL_RULES: &str = "Judge the statement as the conversation finally left it: if a later message updates, completes or replaces it, judge that final state, and answer `supported` when the text captures the final state. Hedged wording (\"should be\", \"I think\", \"probably\") that the text states definitively is `supported`, unless the text contradicts the substance.\n\nAnswer with one JSON object only: {\"verdict\": \"supported\"|\"missing\"|\"contradicted\"|\"not_applicable\"}. `supported`: the text states the statement's final state or something that clearly implies it. `missing`: the text does not say it. `contradicted`: only when the text asserts the opposite of the statement's final state, or reverses who did what. `not_applicable`: the statement has no lasting content (a greeting, an acknowledgement, a question with no answer in these messages, or procedural instructions).";
+const DISTILL_RULES: &str = "Judge the statement as the conversation finally left it: if a later message updates, completes or replaces it, judge that final state, and answer `supported` when the text captures the final state. Hedged wording (\"should be\", \"I think\", \"probably\") that the text states definitively is `supported`, unless the text contradicts the substance.\n\nAnswer with one JSON object only: {\"verdict\": \"supported\"|\"missing\"|\"contradicted\"|\"not_applicable\"}. `supported`: the text states the statement's final state or something that clearly implies it. `missing`: the text does not say it. `contradicted`: only when the text asserts the opposite of the statement's final state, or reverses who did what. `not_applicable`: the statement has no lasting content (a greeting, an acknowledgement, a question with no answer in these messages, or procedural instructions). A greeting, check-in, pleasantry or question is `not_applicable` as a statement: its content counts through the answer, if the answer is among these messages.";
 
 /// A distill-point verdict: [`verdict`]'s, or `not_applicable`.
 pub fn distill_verdict(answer: &str) -> &'static str {
@@ -221,38 +203,84 @@ pub fn page_reason(point: &str, kind: &str, counts: &Counts, floor: f64) -> Opti
     }
 }
 
-/// The digest's line, `F: specifics 100%, concepts 9/10 (30-day 0.87)`, from the rows of the
-/// digest's window and of the last 30 days (`type`, `sampled`, `supported`, `unjudged` each).
-pub fn digest_line(window: &[Value], month: &[Value]) -> Option<String> {
+/// The skip rate above which the digest flags the 7 days' skips (SETTLE-1d §5).
+pub const SKIP_FLAG: f64 = 0.5;
+
+/// The digest's line (SETTLE-1d §4, §5), `F: specifics 41/52 values (78%, 7d), unexplained 3/52,
+/// skipped 12/60 (20%), concepts 9/10 (7d) (30-day 0.87)`, when the digest's window holds a check
+/// (`window`): the specifics pooled over the last 7 days' distill-point rows scored per value
+/// (`week`, `rule:values` only: older per-sentence rows are never pooled with them), the missing
+/// values the distiller did not skip, the values it skipped of those its checklists listed
+/// (flagged above [`SKIP_FLAG`]), the concepts over the same days' distill-point rows, and the
+/// 30-day concept figure over every concept row (`month`). Rows carry `point`, `type`, `judge`,
+/// `sampled`, `supported`, `unjudged` and `items`.
+pub fn digest_line(window: &[Value], week: &[Value], month: &[Value]) -> Option<String> {
     if window.is_empty() {
         return None;
     }
-    let sum = |rows: &[Value], kind: &str, field: &str| -> u64 {
-        rows.iter()
-            .filter(|r| r["type"] == kind)
-            .map(|r| r[field].as_u64().unwrap_or(0))
-            .sum()
-    };
-    let judged =
-        |rows: &[Value]| sum(rows, "concept", "sampled") - sum(rows, "concept", "unjudged");
-    let specifics = match sum(window, "specific", "sampled") {
+    let distill =
+        |kind: &'static str| move |r: &&Value| r["point"] == "distill" && r["type"] == kind;
+    let values: Vec<&Value> = week
+        .iter()
+        .filter(distill("specific"))
+        .filter(|r| r["judge"] == RULE_VALUES)
+        .collect();
+    let specifics = match sum(&values, "sampled") {
         0 => "-".to_owned(),
-        n => format!("{}%", sum(window, "specific", "supported") * 100 / n),
+        n => {
+            let kept = sum(&values, "supported");
+            let unexplained = items_sum(&values, "values_unexplained");
+            format!(
+                "{kept}/{n} values ({}%, 7d), unexplained {unexplained}/{n}, skipped {}",
+                kept * 100 / n,
+                skip_rate(&values)
+            )
+        }
     };
-    let concepts = match judged(window) {
-        0 => "unjudged".to_owned(),
-        n => format!("{}/{n}", sum(window, "concept", "supported")),
+    let concepts: Vec<&Value> = week.iter().filter(distill("concept")).collect();
+    let concepts = match judged(&concepts) {
+        0 => "unjudged (7d)".to_owned(),
+        n => format!("{}/{n} (7d)", sum(&concepts, "supported")),
     };
-    let thirty = match judged(month) {
+    let month: Vec<&Value> = month.iter().filter(|r| r["type"] == "concept").collect();
+    let thirty = match judged(&month) {
         0 => "-".to_owned(),
-        n => format!(
-            "{:.2}",
-            sum(month, "concept", "supported") as f64 / n as f64
-        ),
+        n => format!("{:.2}", sum(&month, "supported") as f64 / n as f64),
     };
     Some(format!(
         "F: specifics {specifics}, concepts {concepts} (30-day {thirty})"
     ))
+}
+/// `12/60 (20%)`, `40/60 (67%, over 50%: FLAGGED)`, or `-` when no checklist was logged.
+fn skip_rate(rows: &[&Value]) -> String {
+    let (skipped, listed) = (
+        items_sum(rows, "values_skipped"),
+        items_sum(rows, "checklist_values"),
+    );
+    if listed == 0 {
+        return "-".to_owned();
+    }
+    let rate = skipped as f64 / listed as f64;
+    let flag = match rate > SKIP_FLAG {
+        true => format!(", over {}%: FLAGGED", (SKIP_FLAG * 100.0) as u64),
+        false => String::new(),
+    };
+    format!(
+        "{skipped}/{listed} ({}%{flag})",
+        (rate * 100.0).round() as u64
+    )
+}
+fn items_sum(rows: &[&Value], field: &str) -> u64 {
+    rows.iter()
+        .map(|r| r["items"][field].as_u64().unwrap_or(0))
+        .sum()
+}
+fn sum(rows: &[&Value], field: &str) -> u64 {
+    rows.iter().map(|r| r[field].as_u64().unwrap_or(0)).sum()
+}
+/// Judged items: sampled less unjudged.
+fn judged(rows: &[&Value]) -> u64 {
+    sum(rows, "sampled") - sum(rows, "unjudged")
 }
 
 #[cfg(test)]
@@ -300,6 +328,9 @@ mod tests {
         assert!(q.contains("as the conversation finally left it"));
         assert!(q.contains("Hedged wording"));
         assert!(q.contains("\"not_applicable\""));
+        assert!(q.contains(
+            "A greeting, check-in, pleasantry or question is `not_applicable` as a statement"
+        ));
         assert!(distill_question("s", "", "t").contains("in order:\n(none)\n"));
         assert_eq!(
             parse_distill_answer("{\"verdict\":\"not_applicable\"}"),
@@ -311,16 +342,14 @@ mod tests {
         assert_eq!(parse_answer("{\"verdict\":\"not_applicable\"}"), None);
     }
     #[test]
-    fn value_sentences_and_exact_match() {
+    fn value_sentences() {
         let text = "Tobiah Quell moved the Larkspur ferry inspection to May 14. Good!\nThe crew budget is 3,200 crowns.";
         let s = sentences(text);
         assert_eq!(s.len(), 3);
-        assert_eq!(values(&s[0]), ["Quell", "Larkspur", "May", "14"]);
-        assert!(values("Good!").is_empty());
-        assert_eq!(values(&s[2]), ["3,200"]);
-        let specifics = "Larkspur ferry inspection May 14 Tobiah Quell moved";
-        assert_eq!(specific_verdict(&s[0], specifics), "supported");
-        assert_eq!(specific_verdict(&s[2], specifics), "missing");
+        let common = CommonWords::default();
+        assert_eq!(values(&s[0], &common), ["Quell", "Larkspur", "May", "14"]);
+        assert!(values("Good!", &common).is_empty());
+        assert_eq!(values(&s[2], &common), ["3,200"]);
     }
     #[test]
     fn verdicts_pages_and_the_digest_line() {
@@ -353,15 +382,41 @@ mod tests {
         let mut none = Counts::default();
         none.add(None);
         assert_eq!(page_reason("consolidation", "concept", &none, FLOOR), None);
-        let rows = [
-            json!({"type":"specific","sampled":4,"supported":4,"unjudged":0}),
-            json!({"type":"concept","sampled":10,"supported":9,"unjudged":0}),
+        let row = |point: &str, kind: &str, judge: &str, n: u64, s: u64| {
+            json!({"point":point,"type":kind,"judge":judge,"sampled":n,"supported":s,"unjudged":0,
+                "items":{"values_unexplained":n - s - 1,"values_skipped":3,"checklist_values":10}})
+        };
+        let week = [
+            row("distill", "specific", RULE_VALUES, 30, 20),
+            row("distill", "specific", "rule:exact", 10, 1),
+            row("consolidation", "specific", "rule:exact", 4, 0),
+            row("distill", "specific", RULE_VALUES, 22, 20),
+            row("distill", "concept", "judge:x", 10, 9),
+            row("consolidation", "concept", "judge:x", 10, 2),
         ];
         let month = [json!({"type":"concept","sampled":20,"supported":17,"unjudged":0})];
         assert_eq!(
-            digest_line(&rows, &month).unwrap(),
-            "F: specifics 100%, concepts 9/10 (30-day 0.85)"
+            digest_line(&week[..1], &week, &month).unwrap(),
+            "F: specifics 40/52 values (76%, 7d), unexplained 10/52, skipped 6/20 (30%), concepts 9/10 (7d) (30-day 0.85)"
         );
-        assert_eq!(digest_line(&[], &month), None);
+        assert_eq!(
+            digest_line(&week[1..2], &week[1..3], &[]).unwrap(),
+            "F: specifics -, concepts unjudged (7d) (30-day -)"
+        );
+        let mut gamed = week[0].clone();
+        gamed["items"]["values_skipped"] = json!(6);
+        assert!(
+            digest_line(&week[..1], &[gamed], &[])
+                .unwrap()
+                .contains(", skipped 6/10 (60%, over 50%: FLAGGED), concepts")
+        );
+        let mut old = week[0].clone();
+        old["items"] = json!([]);
+        assert!(
+            digest_line(&week[..1], &[old], &[])
+                .unwrap()
+                .contains("unexplained 0/30, skipped -,")
+        );
+        assert_eq!(digest_line(&[], &week, &month), None);
     }
 }

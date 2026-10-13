@@ -1,0 +1,23 @@
+{
+ "entries": [
+  {
+   "title": "Build target",
+   "body": "The first build runs on the 64-bit target.",
+   "tags": [
+    "build"
+   ]
+  }
+ ],
+ "claims": [
+  {
+   "kind": "specific",
+   "subject": "CTX-1",
+   "predicate": "runs on",
+   "object": "x86-64, per O'Brien",
+   "date": "@YEAR@-06-02",
+   "quote": "CTX-1 runs on x86-64",
+   "line": 1
+  }
+ ],
+ "relations": []
+}

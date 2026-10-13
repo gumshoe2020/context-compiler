@@ -6,6 +6,7 @@
 #          --send <exe> --page <exe> --state <dir> [--rollup] [--llm <spec>] [--judge <spec>]
 #          [--retries 3] [--retry-delay 120] [--send-timeout 60] [--canaries <file>]
 #          [--mempalace-check <path>] [--wing <name>] [--person <name>] [--assistant <name>]
+#          [--max-cluster <n>]
 #          [--no-deliver-stages | --no-digest | --deliver-only]
 #   --palace, --kg     the palace and its graph; the claim store is the compiler.sqlite beside --kg
 #   --diary-root       the diary ROOT (the parent of diary/)
@@ -16,6 +17,8 @@
 #                      (UNDELIVERED); never receives an ask, the digest or any text of the rollup
 #   --rollup           run `palace rollup` first (compression nights); needs --llm
 #   --llm              `palace rollup --llm` (replay | claude-cli[:model] | command:<exe>)
+#   --max-cluster      `palace rollup --max-cluster` (default: the rollup's own, 25): a thread
+#                      whose cluster holds more entries is skipped (ROLLUP SKIP, exit 0)
 #   --wing             `palace rollup --wing`: the wing the rollup is mined into (default: the
 #                      rollup's own, openclaw)
 #   --person, --assistant  `palace --person/--assistant` for every palace command: the two
@@ -58,7 +61,7 @@ set -u
 { command exec 9>&1; } 2>/dev/null || exec 9>/dev/null >/dev/null
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd) || exit 2
-PALACE="" DIARY="" KG="" PALACE_BIN="" SEND="" PAGE="" LLM="" JUDGE="" ROLLUP=0 STATE="" WING="" PERSON="" ASSISTANT=""
+PALACE="" DIARY="" KG="" PALACE_BIN="" SEND="" PAGE="" LLM="" JUDGE="" ROLLUP=0 STATE="" WING="" PERSON="" ASSISTANT="" MAX_CLUSTER=""
 DELIVER="" # "" (asks and digest, as before the flags) | none | asks | only
 RETRIES=3 DELAY=120 SEND_TIMEOUT=60
 CANARIES="$ROOT/fixtures/canaries.json"
@@ -98,6 +101,7 @@ while [ $# -gt 0 ]; do
     --canaries) CANARIES="$2" ;;
     --mempalace-check) CHECK="$2" ;;
     --wing) WING="$2" ;;
+    --max-cluster) MAX_CLUSTER="$2" ;;
     --person) PERSON="$2" ;;
     --assistant) ASSISTANT="$2" ;;
     *) die "unknown option: $1" ;;
@@ -402,7 +406,7 @@ watch_with_judge() {
 run_stages() {
   [ "$ROLLUP" -eq 0 ] || stage rollup palace rollup --diary "$DIARY" --palace "$PALACE" \
     --kg "$KG" --llm "$LLM" --prompts "$ROOT/prompts" --canaries "$CANARIES" \
-    --keep "$STATE/rollup-attempts" ${WING:+--wing "$WING"}
+    --keep "$STATE/rollup-attempts" ${WING:+--wing "$WING"} ${MAX_CLUSTER:+--max-cluster "$MAX_CLUSTER"}
   stage watch watch_with_judge
   stage auto palace improve --auto --kg "$KG" --palace "$PALACE" --diary "$DIARY" \
     --store "$STORE" ${JUDGE:+--judge "$JUDGE"}

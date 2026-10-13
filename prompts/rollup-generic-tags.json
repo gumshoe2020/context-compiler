@@ -1,0 +1,15 @@
+{
+  "_about": "SETTLE-1f §2: tags that never pull a diary entry into a rollup thread's cluster (palace rollup's pull), because many threads share them. A thread named by one of them gets no entry through its tag or its title, only through its lineage (the prior rollups' superseded and referenced entries) and continuing-thread:<name>; a candidate tag in this list is not searched. Read on every run from the --prompts directory, so edits apply without a rebuild; without the file, the copy built into palace is used. {person} and {assistant} stand for the names palace runs under (--person, --assistant). Matching is case-insensitive. Every list below is merged; the grouping is only for reading.",
+  "people": ["{person}", "{assistant}"],
+  "thread_markers": ["continuing-thread", "ongoing-thread", "rollup", "no-compress"],
+  "kinds_of_entry": [
+    "decision",
+    "design-decision",
+    "hazard",
+    "lesson",
+    "correction",
+    "review",
+    "follow-up",
+    "claim-improvement"
+  ]
+}

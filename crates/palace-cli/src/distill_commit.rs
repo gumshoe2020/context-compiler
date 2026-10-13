@@ -65,11 +65,13 @@ struct Commit {
     to: u64,
 }
 
+/// `checklist`: the values listed in the prompt, logged with the run (SETTLE-1d §5).
 pub fn commit(
     options: &Options,
     run: &Run,
     reply: &Reply,
     lines: &[CopyLine],
+    checklist: &[(usize, Vec<String>)],
 ) -> Result<i32, Error> {
     recover(options)?;
     let copy = run.copy_path(options)?.to_string_lossy().into_owned();
@@ -86,7 +88,7 @@ pub fn commit(
         .collect();
     log(
         run,
-        json!({"operation":"distill_commit","run":run.key,"transcript":run.transcript,"source":run.source.name(),"session":run.session,"wing":run.wing,"from":run.from,"to":run.to,"copy":copy,"range":range,"at":at,"files":files,"reply":distill::to_json(reply)}),
+        json!({"operation":"distill_commit","run":run.key,"transcript":run.transcript,"source":run.source.name(),"session":run.session,"wing":run.wing,"from":run.from,"to":run.to,"copy":copy,"range":range,"at":at,"files":files,"reply":distill::to_json(reply),"checklist":checklist.iter().map(|(line, values)| json!({"line":line,"values":values})).collect::<Vec<_>>()}),
     )?;
     let commit = Commit {
         key: run.key.clone(),

@@ -138,7 +138,9 @@ fn distill(options: &Options, run: Run, turns: &[(usize, Turn)]) -> Result<i32, 
         );
         return record(options, run.to).map(|()| 0);
     }
-    let Some(checked) = ask(options, &run, &lines)? else {
+    let common = crate::fidelity_cmd::common_words(&options.prompts)?;
+    let checklist = distill::checklist(&lines, &common);
+    let Some(checked) = ask(options, &run, &lines, &checklist)? else {
         return Ok(crate::rollup::EXIT_INVALID);
     };
     if options.dry_run {
@@ -149,20 +151,28 @@ fn distill(options: &Options, run: Run, turns: &[(usize, Turn)]) -> Result<i32, 
         println!("DISTILL dry-run wing={} position={}", run.wing, run.to);
         return Ok(0);
     }
-    let code = distill_commit::commit(options, &run, &checked.reply, &lines)?;
+    log_skips(&checked.reply, &checklist);
+    let code = distill_commit::commit(options, &run, &checked.reply, &lines, &checklist)?;
     record(options, run.to)?;
     Ok(code)
 }
 
 /// The model's checked reply: asked once, and once more with the problems named when the reply
 /// fails its check (spec §4.4); `None` (printed DISTILL INVALID) when the second also fails its
-/// shape. A `specific` still without a verbatim quote after the retry becomes a `concept`.
-fn ask(options: &Options, run: &Run, lines: &[CopyLine]) -> Result<Option<Checked>, Error> {
+/// shape. A `specific` still without a verbatim quote after the retry becomes a `concept`; a
+/// `skipped` item still rejected is dropped (SETTLE-1d §5).
+fn ask(
+    options: &Options,
+    run: &Run,
+    lines: &[CopyLine],
+    checklist: &[(usize, Vec<String>)],
+) -> Result<Option<Checked>, Error> {
     let model = model(options)?;
     let policy = palace_core::names::in_prose(&fs::read_to_string(crate::paths::input(
         &options.prompts.join("distill.md"),
     )?)?);
-    let prompt = distill::prompt(&policy, &run.session, lines);
+    let prompt =
+        distill::prompt(&policy, &run.session, lines) + &distill::checklist_block(checklist);
     let first = distill::check(&model.complete(&prompt)?, lines);
     if first.passed() {
         return Ok(Some(first));
@@ -178,10 +188,29 @@ fn ask(options: &Options, run: &Run, lines: &[CopyLine]) -> Result<Option<Checke
         return Ok(None);
     }
     distill::demote_unquoted(&mut second);
+    for dropped in distill::drop_bad_skips(&mut second) {
+        eprintln!("distill: dropped after the retry: {dropped}");
+    }
     Ok(Some(second))
+}
+/// The distill log's line for the skips (SETTLE-1d §5: stored with the run, never as claims).
+fn log_skips(reply: &distill::Reply, checklist: &[(usize, Vec<String>)]) {
+    let listed: usize = checklist.iter().map(|(_, v)| v.len()).sum();
+    let named: Vec<String> = reply
+        .skipped
+        .iter()
+        .map(|k| format!("L{} {} ({})", k.line, k.value, k.reason))
+        .collect();
+    eprintln!(
+        "distill: values listed={listed} skipped={}{}{}",
+        named.len(),
+        if named.is_empty() { "" } else { ": " },
+        named.join("; ")
+    );
 }
 fn problems(checked: &Checked) -> Vec<String> {
     let mut all = checked.problems.clone();
+    all.extend(checked.bad_skips.iter().cloned());
     for index in &checked.unquoted_specifics {
         all.push(format!(
             "claim {index} is marked specific but its quote is missing or not verbatim in the conversation"

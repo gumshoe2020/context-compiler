@@ -40,13 +40,34 @@ fn lines(o: &Options) -> Result<Vec<String>, Error> {
         unsent: store.unsent_asks()?.len(),
     };
     let mut lines = palace_core::digest::lines(&events, open, o.max);
-    // SETTLE-1b (spec §8): one recall line when the window holds fidelity checks.
-    let (window, month) = (
+    lines.extend(skip_lines(&store, &since)?);
+    // SETTLE-1b (spec §8): one recall line when the window holds fidelity checks, pooled over
+    // the last 7 days (SETTLE-1d §4).
+    let (window, week, month) = (
         store.fidelity_rows(Some(&since))?,
+        store.fidelity_rows(Some(&store.days_ago(7)?))?,
         store.fidelity_rows(None)?,
     );
-    lines.extend(palace_core::recall::digest_line(&window, &month));
+    lines.extend(palace_core::recall::digest_line(&window, &week, &month));
     Ok(lines)
+}
+
+/// SETTLE-1f §2: one line per thread the rollup refused in the window for its cluster's size.
+fn skip_lines(store: &ClaimStore, since: &str) -> Result<Vec<String>, Error> {
+    let skips = store.events("rollup_skip")?;
+    let in_window = |e: &&serde_json::Value| e["at"].as_str().is_some_and(|at| at >= since);
+    Ok(skips
+        .iter()
+        .filter(in_window)
+        .map(|e| {
+            format!(
+                "rollup skipped: thread={} cluster={} over the cap of {}",
+                e["thread"].as_str().unwrap_or_default(),
+                e["cluster"],
+                e["cap"]
+            )
+        })
+        .collect())
 }
 
 /// `--store`, else the claim store beside `--kg` (`--digest`, `--unsent`, `--mark-sent`).

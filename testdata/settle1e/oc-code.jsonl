@@ -1,0 +1,6 @@
+{"ts": "2031-06-02T19:00:00Z", "role": "user", "text": "Run this first:\n```sh\nssh -U tomas@harrowgate ~/.ssh/config\nTerminal Allow\n```\nThen `git push Origin` from ./Build, see https://quell.example/notes or harrowgate.com, wenna/nix-demo and /srv/ravi. Use --dry-run or -U. Also, Priya moved the review to 10/17."}
+{"ts": "2031-06-02T19:01:00Z", "role": "assistant", "text": "Noted."}
+{"ts": "2031-06-02T19:02:00Z", "role": "user", "text": "ok thanks, that is all"}
+{"ts": "2031-06-02T19:03:00Z", "role": "assistant", "text": "Good night."}
+{"ts": "2031-06-02T19:04:00Z", "role": "user", "text": "night"}
+{"ts": "2031-06-02T19:05:00Z", "role": "assistant", "text": "Sleep well."}

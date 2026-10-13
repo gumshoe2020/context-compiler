@@ -1,0 +1,13 @@
+{
+ "entries": [
+  {
+   "title": "Larkspur crew budget",
+   "body": "The Larkspur inspection crew has a budget of 3,200 crowns this season; Wenna Ostrow holds it and signs off spending.",
+   "tags": ["larkspur-ferry", "inspection", "crew-budget"]
+  }
+ ],
+ "claims": [
+  {"kind": "specific", "subject": "Larkspur inspection crew", "predicate": "has budget", "object": "3,200 crowns", "date": "2031-04-03", "quote": "crew budget is 3,200 crowns", "line": 1}
+ ],
+ "relations": []
+}

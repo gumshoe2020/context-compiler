@@ -44,6 +44,9 @@
 # DISTILL_LLM (palace distill --llm; unset: the rollup model, --llm),
 # DISTILL_RECALL_MIN_WORDS=8 (palace fidelity --distill --min-words: SETTLE-1c §1),
 # DISTILL_RECALL_FOLLOWING=6 (palace fidelity --distill --following: SETTLE-1c §2),
+# DISTILL_SPECIFIC_SAMPLE=20 (palace fidelity --distill --specific-sample: SETTLE-1d §2),
+# ROLLUP_MAX_CLUSTER (palace rollup --max-cluster, passed only when set; unset: the rollup's own
+# cap, 25: SETTLE-1f §2),
 # ASKS_WINDOW=08:00-21:00 (local time,
 # start included, end excluded; SETTLE_NOW=HH:MM replaces the clock, for tests). One run at a
 # time: state/settle.lock (a live holder is waited for, up to an hour: then SETTLE BUSY, exit 3;
@@ -106,6 +109,9 @@ settings() {
   SAMPLE=$(number FIDELITY_SAMPLE "${FIDELITY_SAMPLE:-10}" 10)
   MIN_WORDS=$(number DISTILL_RECALL_MIN_WORDS "${DISTILL_RECALL_MIN_WORDS:-8}" 8)
   FOLLOWING=$(number DISTILL_RECALL_FOLLOWING "${DISTILL_RECALL_FOLLOWING:-6}" 6)
+  SPECIFIC_SAMPLE=$(number DISTILL_SPECIFIC_SAMPLE "${DISTILL_SPECIFIC_SAMPLE:-20}" 20)
+  MAX_CLUSTER=""
+  [ -z "${ROLLUP_MAX_CLUSTER:-}" ] || MAX_CLUSTER=$(number ROLLUP_MAX_CLUSTER "$ROLLUP_MAX_CLUSTER" 25)
   FLOOR=${FIDELITY_FLOOR:-0.7}
   case "$FLOOR" in
     0 | 1 | 0.[0-9]* | 1.0*) ;;
@@ -319,7 +325,7 @@ fidelity() {
   # it (SETTLE-1c §1, §2).
   [ "$1" != --distill ] || {
     transcript_roots="--roots=$(dirname "$2")" page=""
-    distill_flags="--min-words $MIN_WORDS --following $FOLLOWING"
+    distill_flags="--min-words $MIN_WORDS --following $FOLLOWING --specific-sample $SPECIFIC_SAMPLE"
   }
   # shellcheck disable=SC2086 # each is one word or none, distill_flags whole words
   palace $judge_roots $transcript_roots fidelity $distill_flags --diary "$CC_HOME/diary-root" \
@@ -405,7 +411,7 @@ consolidation() {
   fi
   if { [ -n "$count" ] && [ "$new" -ge "$COMPRESS_ENTRIES" ]; } ||
     { [ $((today - day)) -ge "$COMPRESS_DAYS" ] && [ "$new" -ge 1 ]; }; then
-    ROLLUP="--rollup --llm $LLM" NEW_RECORD=today
+    ROLLUP="${MAX_CLUSTER:+--max-cluster $MAX_CLUSTER }--rollup --llm $LLM" NEW_RECORD=today
     say "consolidation due: $new entries new, the last $((today - day)) days ago"
   fi
 }

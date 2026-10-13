@@ -1,0 +1,23 @@
+{
+ "entries": [
+  {
+   "title": "Build target",
+   "body": "The first build runs on the 64-bit target.",
+   "tags": [
+    "build"
+   ]
+  }
+ ],
+ "claims": [
+  {
+   "kind": "specific",
+   "subject": "CTX",
+   "predicate": "runs on",
+   "object": "86 cores, per Brien",
+   "date": "@YEAR@-06-02",
+   "quote": "runs on",
+   "line": 1
+  }
+ ],
+ "relations": []
+}

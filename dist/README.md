@@ -163,14 +163,21 @@ names go to every `palace` command of the run). The scheduler is reached only th
   (`state/last-compression`, the first run starting the count). Nothing is recorded unless
   palace-cron.sh succeeds, so the next trigger or the daily run retries a failed run. A rollup
   never restates a specific: it copies the value and cites the claim's id, or fails its
-  validation. After each distill and each rollup, `palace fidelity` measures what the
+  validation. A thread's cluster is its earlier rollups' entries and the entries tagged with the
+  thread's name (or `continuing-thread:<name>`) or titled with it; the tags many threads share
+  (`prompts/rollup-generic-tags.json`) never pull an entry in. A thread whose cluster still holds
+  more than `ROLLUP_MAX_CLUSTER` (25) entries is skipped (`ROLLUP SKIP`, in the digest), and the
+  night goes on. After each distill and each rollup, `palace fidelity` measures what the
   compression kept (specifics by exact match, up to `FIDELITY_SAMPLE` (10) concepts by the
   `--judge`), records it in the claim store and pages on a dropped specific, a contradiction
-  or concept recall under `FIDELITY_FLOOR` (0.7); the digest carries one `F:` line. It never
-  changes the memory. After a distill it samples only messages of `DISTILL_RECALL_MIN_WORDS`
+  or concept recall under `FIDELITY_FLOOR` (0.7); the digest carries one `F:` line, pooled over
+  the last 7 days of distills. It never changes the memory. After a distill it samples only messages of `DISTILL_RECALL_MIN_WORDS`
   (8) or more words, shows the judge each with up to `DISTILL_RECALL_FOLLOWING` (6) later
   messages so it judges what the conversation finally settled, leaves out messages with no
-  lasting content, and only logs: it never pages (env.sh may set either value).
+  lasting content (greetings, check-ins and questions among them), and only logs: it never
+  pages. Its specifics sample is up to `DISTILL_SPECIFIC_SAMPLE` (20) sentences that carry a
+  value (a number, a date or a name; `prompts/recall-common-words.json` lists the capitalized
+  words that are not names), scored value by value (env.sh may set each of these).
 - The daily job (05:00): the same settle work when anything is pending (a request, a
   transcript with text not yet distilled, or entries new since the last settle run: a backstop
   for a crash or a closed laptop), then the asks and the digest. A Mac asleep at 05:00 runs it on waking.
@@ -218,7 +225,7 @@ One uninstall serves both installers (`$CC_HOME/codex-env.sh`, `$CC_HOME/claude-
 ## Not verified yet
 
 Checked against stand-ins only: the repository's acceptance test (not shipped), with the real
-MemPalace 3.5.0 in fake homes and a stand-in model, ends `SETTLE1C OK`. A test with real Codex in a fresh account comes
+MemPalace 3.5.0 in fake homes and a stand-in model, ends `SETTLE1H OK`. A test with real Codex in a fresh account comes
 next. Shown with real Codex 0.154 before: the UserPromptSubmit hook's JSON reaches the model;
 MCP tools need the approval tables; `--ignore-user-config` alone leaves the account's apps on
 (hence codex-llm.sh's four `--disable` flags). Still open: SessionStart's JSON as context;

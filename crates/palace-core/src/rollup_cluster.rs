@@ -1,11 +1,15 @@
-//! Rollup stage 3: pull the thread's cluster — MemPalace hits for the thread and its tags, plus
-//! the primaries a prior `ROLLUP: <thread>` superseded. Rollups are never sources.
+//! Rollup stage 3: pull the thread's cluster — the entries a prior `ROLLUP: <thread>` superseded
+//! or referenced (its lineage), then the diary entries with thread-specific evidence
+//! (`rollup_membership`, SETTLE-1f §2): first those MemPalace finds for the thread and its
+//! non-generic tags, in its order, then the rest, newest first. Rollups are never sources.
 use crate::{
     evidence::is_bookkeeping,
     rollup::{Entry, rollup_thread, superseded_live, superseded_sources, voided},
+    rollup_membership::{GenericTags, joins},
     rollup_prep::entry_date,
     traits::{DiaryReader, Searcher},
 };
+use std::collections::BTreeMap;
 
 pub const HITS_PER_QUERY: usize = 10;
 pub const MAX_CHARS: usize = 60_000;
@@ -59,18 +63,28 @@ pub struct Cluster {
     /// Entries a prior rollup referenced without superseding and no prior superseded: members
     /// only as reference-only (M5b-1 item 5).
     pub referenced: Vec<String>,
+    /// Why each member and dropped entry joined (SETTLE-1f §2): `lineage`, `tag <tag>` or `title`.
+    pub joined_by: BTreeMap<String, String>,
 }
 impl Cluster {
     pub fn member(&self, name: &str) -> Option<&Member> {
         let name = name.strip_suffix(".md").unwrap_or(name);
         self.members.iter().find(|m| m.entry.name == name)
     }
+    /// The entries that joined: the members and those the budget left out (SETTLE-1f §2's cap).
+    pub fn size(&self) -> usize {
+        self.members.len() + self.dropped.len()
+    }
 }
 pub struct Request<'a> {
     pub thread: &'a str,
     pub tags: &'a [String],
     pub as_of: &'a str,
+    /// Tags that are never evidence and never searched (SETTLE-1f §2).
+    pub generic: &'a GenericTags,
 }
+/// `ROLLUP_MAX_CLUSTER`'s default: a thread whose cluster holds more entries is skipped.
+pub const MAX_CLUSTER: usize = 25;
 /// The thread's cluster: the prior rollups' superseded entries first (and which of them a void
 /// made primaries again), then the search hits for the thread and its tags, within the budget.
 pub fn pull<D, S>(diary: &D, searcher: &S, request: &Request) -> Result<Cluster, String>
@@ -83,7 +97,11 @@ where
     let names = diary.names().map_err(|e| e.to_string())?;
     let priors = prior_rollups(diary, &names, request)?;
     let (mut ordered, followed_voids, referenced) = prior_sources(diary, &names, &priors)?;
+    let lineage = ordered.len();
     push_unique(&mut ordered, search_hits(searcher, &names, request)?);
+    let mut newest_first = names.clone();
+    newest_first.sort_by(|a, b| b.cmp(a));
+    push_unique(&mut ordered, newest_first);
     let mut cluster = Cluster {
         thread: request.thread.into(),
         prior_rollups: priors.iter().map(|p| p.name.clone()).collect(),
@@ -91,7 +109,8 @@ where
         referenced,
         ..Default::default()
     };
-    fill(&mut cluster, diary, &ordered, request.as_of)?;
+    let (lineage, candidates) = ordered.split_at(lineage);
+    fill(&mut cluster, diary, (lineage, candidates), request)?;
     Ok(cluster)
 }
 
@@ -141,7 +160,9 @@ where
     S::Error: std::fmt::Display,
 {
     let mut found = Vec::new();
-    for query in std::iter::once(request.thread).chain(request.tags.iter().map(String::as_str)) {
+    let tags = request.tags.iter().map(String::as_str);
+    let specific = tags.filter(|t| !request.generic.contains(t));
+    for query in std::iter::once(request.thread).chain(specific) {
         let hits = searcher
             .search(query, HITS_PER_QUERY, 1.5)
             .map_err(|e| format!("pull search {query:?}: {e}"))?;
@@ -153,20 +174,20 @@ where
     }
     Ok(found)
 }
+/// The lineage, then each candidate with thread-specific evidence, within the budget.
 fn fill<D: DiaryReader>(
     cluster: &mut Cluster,
     diary: &D,
-    ordered: &[String],
-    as_of: &str,
+    (lineage, candidates): (&[String], &[String]),
+    request: &Request,
 ) -> Result<(), String>
 where
     D::Error: std::fmt::Display,
 {
     let mut budget = MAX_CHARS;
-    for name in ordered
-        .iter()
-        .filter(|n| entry_date(n).is_some_and(|d| d <= as_of))
-    {
+    let dated = |n: &&String| entry_date(n).is_some_and(|d| d <= request.as_of);
+    let ordered = lineage.iter().chain(candidates).filter(dated);
+    for name in ordered {
         let Some(text) = diary.read(name).map_err(|e| e.to_string())? else {
             continue;
         };
@@ -174,6 +195,14 @@ where
         if entry.is_rollup {
             continue; // never summarise the summary
         }
+        let joined_by = match lineage.contains(name) {
+            true => "lineage".to_owned(),
+            false => match joins(&entry, request.thread, request.generic) {
+                Some(evidence) => evidence,
+                None => continue,
+            },
+        };
+        cluster.joined_by.insert(entry.name.clone(), joined_by);
         let size = entry.text.chars().count();
         if size > budget {
             cluster.dropped.push(entry.name);
@@ -298,6 +327,7 @@ mod tests {
             thread: "t",
             tags: &[],
             as_of: "2026-09-22",
+            generic: &Default::default(),
         };
         let c = pull(&d, &hits, &request).unwrap();
         assert_eq!(c.prior_rollups, ["2026-09-21-cccccccccccc"]);
@@ -305,6 +335,7 @@ mod tests {
             thread: "zz-other",
             tags: &["t".to_owned()],
             as_of: "2026-09-22",
+            generic: &Default::default(),
         };
         let names = d.names().unwrap();
         assert!(prior_rollups(&d, &names, &by_tag).unwrap().is_empty());
@@ -318,8 +349,90 @@ mod tests {
             [
                 ("2026-09-20-aaaaaaaaaaaa", true, true),
                 ("2026-09-20-bbbbbbbbbbbb", true, false),
-                ("2026-09-20-ffffffffffff", false, false)
+                ("2026-09-20-ffffffffffff", false, false),
+                ("2026-09-22-dddddddddddd", true, true)
             ]
         );
+        assert_eq!(c.joined_by["2026-09-20-aaaaaaaaaaaa"], "lineage");
+        assert_eq!(c.joined_by["2026-09-22-dddddddddddd"], "tag t");
+    }
+    /// SETTLE-1f §2: a hit sharing only generic tags with the thread stays out, as does a hit with
+    /// no tag; the thread's own tag and its title bring an entry in, hit or not; a generic tag is
+    /// never searched.
+    #[test]
+    fn only_thread_specific_evidence_joins_the_cluster() {
+        let mut d = Memory::default();
+        for (name, text) in [
+            (
+                "2026-09-20-aaaaaaaaaaaa",
+                "# Beds\nTags: callum, garden-plan.",
+            ),
+            (
+                "2026-09-20-bbbbbbbbbbbb",
+                "# Party\nTags: callum, decision, continuing-thread.",
+            ),
+            ("2026-09-20-cccccccccccc", "# untagged note"),
+            (
+                "2026-09-21-dddddddddddd",
+                "# Garden plan: the shed\nTags: shed.",
+            ),
+            (
+                "2026-09-21-eeeeeeeeeeee",
+                "# Paths\nTags: continuing-thread:garden-plan.",
+            ),
+        ] {
+            d.0.insert(name.into(), text.into());
+        }
+        struct Logged(Hits, std::cell::RefCell<Vec<String>>);
+        impl Searcher for Logged {
+            type Error = String;
+            fn search(&self, q: &str, n: usize, c: f64) -> Result<Vec<SearchHit>, String> {
+                self.1.borrow_mut().push(q.to_owned());
+                self.0.search(q, n, c)
+            }
+        }
+        let hits = Logged(
+            Hits(vec![
+                "2026-09-20-bbbbbbbbbbbb.md",
+                "2026-09-20-cccccccccccc.md",
+            ]),
+            Default::default(),
+        );
+        let generic = crate::rollup_membership::GenericTags::parse(
+            r#"{"people": ["{person}"], "kinds": ["decision"]}"#,
+            "callum",
+            "fergus",
+        )
+        .unwrap();
+        let tags = [
+            "callum".to_owned(),
+            "decision".to_owned(),
+            "shed".to_owned(),
+        ];
+        let request = Request {
+            thread: "garden-plan",
+            tags: &tags,
+            as_of: "2026-09-22",
+            generic: &generic,
+        };
+        let c = pull(&d, &hits, &request).unwrap();
+        let joined: Vec<(&str, &str)> = c
+            .members
+            .iter()
+            .map(|m| (m.entry.name.as_str(), c.joined_by[&m.entry.name].as_str()))
+            .collect();
+        assert_eq!(
+            joined,
+            [
+                (
+                    "2026-09-21-eeeeeeeeeeee",
+                    "tag continuing-thread:garden-plan"
+                ),
+                ("2026-09-21-dddddddddddd", "title"),
+                ("2026-09-20-aaaaaaaaaaaa", "tag garden-plan")
+            ]
+        );
+        assert_eq!(*hits.1.borrow(), ["garden-plan", "shed"]);
+        assert_eq!(c.size(), 3);
     }
 }

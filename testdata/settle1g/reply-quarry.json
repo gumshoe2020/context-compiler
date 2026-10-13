@@ -1,0 +1,13 @@
+{
+ "entries": [
+  {
+   "title": "Quarry survey: the brass compass",
+   "body": "Mira Feldane found the brass compass under the spoil heap by the north quarry gate; it is the one the survey team lost last spring, and she is taking it back to the survey hut.",
+   "tags": ["quarry-survey", "mira-feldane", "north-quarry"]
+  }
+ ],
+ "claims": [
+  {"kind": "specific", "subject": "Mira", "predicate": "found", "object": "the brass compass", "date": "2031-05-02", "quote": "Mira found the brass compass under the spoil heap", "line": 3}
+ ],
+ "relations": []
+}

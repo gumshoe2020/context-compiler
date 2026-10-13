@@ -1,6 +1,6 @@
 //! PKG-1.3 item 1: prompts/rollup.md names no real person and carries no design provenance; it
 //! keeps every step and rule in order, and `palace rollup` fills in the names it runs under.
-use palace_core::{names, quote_rule};
+use palace_core::{names, quote_rule, rollup_layout};
 
 fn policy() -> String {
     std::fs::read_to_string(concat!(
@@ -59,6 +59,9 @@ fn every_step_in_order() {
         "DESIGN THREADS — ALWAYS IN SCOPE, COMPRESSED DIFFERENTLY:",
         "Step 2 — PULL THE CLUSTER:",
         "Step 3 — WRITE THE ROLLUP (append-only):",
+        "SUPERSEDES LAYOUT",
+        rollup_layout::OPEN,
+        rollup_layout::CLOSE,
         "Step 3b — CLAIMS FIRST",
         "QUOTES MUST CARRY THE OBJECT",
         quote_rule::OPEN,

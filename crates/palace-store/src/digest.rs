@@ -23,8 +23,12 @@ impl ClaimStore {
 
     /// Twenty-four hours ago, in the event times' format: the digest's default window.
     pub fn day_ago(&self) -> Result<String, Error> {
-        let sql = "SELECT strftime('%Y-%m-%dT%H:%M:%S','now','-1 day')";
-        Ok(self.store.connection.query_row(sql, [], |r| r.get(0))?)
+        self.days_ago(1)
+    }
+    /// `days` times twenty-four hours ago, in the event times' format.
+    pub fn days_ago(&self, days: u32) -> Result<String, Error> {
+        let sql = "SELECT strftime('%Y-%m-%dT%H:%M:%S','now','-'||?1||' days')";
+        Ok(self.store.connection.query_row(sql, [days], |r| r.get(0))?)
     }
 }
 

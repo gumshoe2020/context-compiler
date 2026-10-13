@@ -1,0 +1,13 @@
+{
+ "entries": [
+  {
+   "title": "Quarry survey: the Brackwater kiln",
+   "body": "Oswin Tarr relit the Brackwater kiln for the quarry survey samples. On the first of May Mira Feldane found a silver thimble in the kiln's ash pit. The samples go in the kiln tomorrow.",
+   "tags": ["quarry-survey", "oswin-tarr", "brackwater-kiln"]
+  }
+ ],
+ "claims": [
+  {"kind": "specific", "subject": "Mira", "predicate": "found", "object": "a silver thimble", "date": "2031-05-01", "quote": "Mira found a silver thimble in the ash pit", "line": 3}
+ ],
+ "relations": []
+}

@@ -1,9 +1,9 @@
-<!-- prompts/distill.md — the distill policy (SETTLE-1b, dev/SPEC-event-driven-settle.md §3, §4). palace distill fills in the person's and the assistant's names (--person/--assistant) and appends the conversation's new text, one line per message as `L<line> [user|assistant] <text>`. The command checks the answer; it does the writing, mining and graph wiring itself. Skip rule: palace distill never sends a conversation with fewer than DISTILL_MIN_TURNS exchanges (default 3); it records the position and files nothing. -->
+<!-- prompts/distill.md — the distill policy (SETTLE-1b, dev/SPEC-event-driven-settle.md §3, §4). palace distill fills in the person's and the assistant's names (--person/--assistant) and appends the conversation's new text, one line per message as `L<line> [user|assistant] <text>`, then (SETTLE-1d §5) the block `VALUES IN THIS CONVERSATION (line: values)`: the numbers, dates and names each line carries, as recall::values reads them (at most 60 lines, earliest first; no block when there are none). The command checks the answer; it does the writing, mining and graph wiring itself. Skip rule: palace distill never sends a conversation with fewer than DISTILL_MIN_TURNS exchanges (default 3); it records the position and files nothing. -->
 
 Memory distillation. Below is the new part of one conversation between {Person} and {Assistant}. Decide what of it is worth remembering long-term, and file it as diary entries, typed claims and graph relations. You have no tools: answer with ONE JSON object and nothing else.
 
 WHAT TO FILE
-File only what is worth remembering long-term: decisions made, new facts about people and projects, commitments and dates, preferences {Person} stated, and notable threads that continue (what was tried, what was left open and why). Skip routine chatter, greetings, tool fiddling, status pings and anything already settled elsewhere. If nothing in the conversation is substantive, file nothing: answer {"entries": [], "claims": [], "relations": []}. Filing nothing is a correct answer, not a failure.
+File only what is worth remembering long-term: decisions made, new facts about people and projects, commitments and dates, preferences {Person} stated, and notable threads that continue (what was tried, what was left open and why). Skip routine chatter, greetings, tool fiddling, status pings and anything already settled elsewhere. If nothing in the conversation is substantive, file nothing: answer {"entries": [], "claims": [], "relations": [], "skipped": [...]} with every listed value skipped as chatter. Filing nothing is a correct answer, not a failure.
 
 ENTRIES
 One entry per distinct thread of the conversation, usually one. Each entry: a short title naming the thread; a body of a few plain sentences in the third person, stating what happened and what it means (who decided what, what changed, what is still open); tags: two to five short lowercase words naming the people, the project and the thread (no commas or full stops inside a tag). Never invent anything the conversation does not say.
@@ -15,10 +15,20 @@ Classify every claim, by this rule of thumb: if changing one word or digit would
 - "concept": understanding. Design reasoning, a pattern, a lesson, a theme, a definition. A quote is encouraged. A coined term states its definition and what the term is NOT.
 When a specific replaces an earlier value (a new date, a swapped person, a changed amount), state the new value as its own specific with the same subject and predicate; the store keeps the old one as history.
 
+VALUES CHECKLIST
+When the conversation ends with a block "VALUES IN THIS CONVERSATION (line: values)", account for every value it lists: either it is inside a specific you file (its subject, object or quote), or you name it in "skipped" as {"line": n, "value": "...", "reason": "..."} with one of these reasons:
+- "trivia": true but not worth remembering (a time of day in passing, a count that does not matter);
+- "illustrative": an example or comparison, not a fact about anyone;
+- "hypothetical": a value in a what-if, a plan not made, a guess;
+- "superseded": replaced later in the same conversation (file the final value instead);
+- "chatter": small talk, greetings, sign-offs.
+Any other reason is rejected. Skipping a value that matters long-term is a loss: when in doubt, file it as a specific. A skip is never filed as a claim.
+
 RELATIONS
 Graph relations between the entities the claims name: subject, predicate (snake_case, e.g. depends_on, decided, works_on), object, confidence between 0 and 1, and the line number it comes from. Only relations the conversation states directly. None is fine.
 
 ANSWER SHAPE (one JSON object; line numbers are the L numbers below)
 {"entries": [{"title": "...", "body": "...", "tags": ["...", "..."]}],
  "claims": [{"kind": "specific", "subject": "...", "predicate": "...", "object": "...", "date": "YYYY-MM-DD", "quote": "...", "line": 12}],
- "relations": [{"subject": "...", "predicate": "...", "object": "...", "confidence": 0.8, "line": 12}]}
+ "relations": [{"subject": "...", "predicate": "...", "object": "...", "confidence": 0.8, "line": 12}],
+ "skipped": [{"line": 12, "value": "...", "reason": "trivia"}]}

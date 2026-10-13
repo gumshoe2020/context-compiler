@@ -39,7 +39,7 @@ pub fn write_prompt(
     retry: Option<&str>,
 ) -> String {
     let mut text = format!(
-        "{policy}\n\n{WRITE_MARKER}\nReturn ONLY the rollup entry, first line exactly:\n# {}\nThen, in order, these sections: {}. Claims use the pinned grammar; cite only PRIMARY or REFERENCE ONLY sources below, never BOOKKEEPING; Supersedes lists only PRIMARY sources below, then any entry it points at without superseding in ONE later paragraph labelled exactly \"{REFERENCED_ONLY_LABEL}\"; each relation carries \"claim\": \"Cn\". 2,000–40,000 characters.\n\n=== CLUSTER ({} entries) ===\n",
+        "{policy}\n\n{WRITE_MARKER}\nReturn ONLY the rollup entry, first line exactly:\n# {}\nThen, in order, these sections: {}. Claims use the pinned grammar; cite only PRIMARY or REFERENCE ONLY sources below, never BOOKKEEPING; Supersedes lists only PRIMARY sources below, one \"- <file>\" line each, then any entry it points at without superseding in a later paragraph labelled exactly \"{REFERENCED_ONLY_LABEL}\", one \"- <file>\" line each under the label line (the policy's SUPERSEDES LAYOUT); each relation carries \"claim\": \"Cn\". 2,000–40,000 characters.\n\n=== CLUSTER ({} entries) ===\n",
         target.title(),
         REQUIRED.join(", "),
         cluster.members.len()
@@ -77,6 +77,38 @@ pub struct Specific {
     pub predicate: String,
     pub object: String,
     pub date: String,
+    /// The entries that share its provenance (see [`lineage`]), bare names, its source first.
+    pub lineage: Vec<String>,
+}
+/// SETTLE-1g §1: the entries that share the provenance of a specific stated by `source`: the
+/// source itself; each entry the source's `## Supersedes` names (superseded or referenced only);
+/// and each of `entries` whose `## Supersedes` names the source (the rollup that carries it).
+/// `entries` are the texts at hand (the cluster's members and its prior rollups). Bare names,
+/// the source first.
+pub fn lineage(source: &str, entries: &[&Entry], names: &[String]) -> Vec<String> {
+    let source = bare(source);
+    let named = |e: &Entry| {
+        let refs = superseded_sources(e, names);
+        refs.resolved.into_iter().chain(refs.referenced_only)
+    };
+    let mut found = vec![source.to_owned()];
+    for e in entries {
+        let named: Vec<String> = named(e).collect();
+        let shared = match e.name == source {
+            true => named,
+            false if named.iter().any(|n| n == source) => vec![e.name.clone()],
+            false => continue,
+        };
+        for name in shared {
+            if !found.contains(&name) {
+                found.push(name);
+            }
+        }
+    }
+    found
+}
+fn bare(name: &str) -> &str {
+    name.trim().strip_suffix(".md").unwrap_or(name.trim())
 }
 /// The write prompt's list of the live specifics the cluster states, with the rule (spec §5);
 /// empty when there are none, so a rollup without distilled specifics gets the prompt as before.
@@ -85,12 +117,17 @@ pub fn specifics_section(specifics: &[Specific]) -> String {
         return String::new();
     }
     let mut text = String::from(
-        "\n=== LIVE SPECIFICS (exact values the cluster states) ===\nA rollup may not paraphrase a specific: cite it by its claim id and copy its value exactly (a claim line with the same subject and predicate carries this exact object; a line naming the id carries the exact value). A rollup that states a different value fails validation.\n",
+        "\n=== LIVE SPECIFICS (exact values the cluster states) ===\nA rollup may not paraphrase a specific: cite it by its claim id and copy its value exactly (a claim line with the same subject and predicate that cites the source named after the value, or an entry that source supersedes or a rollup that carries it, carries this exact object; a line naming the id carries the exact value). A rollup that states a different value fails validation.\n",
     );
     for s in specifics {
         text.push_str(&format!(
-            "- {}: {} | {} | {} ({})\n",
-            s.id, s.subject, s.predicate, s.object, s.date
+            "- {}: {} | {} | {} ({}) — from {}.md\n",
+            s.id,
+            s.subject,
+            s.predicate,
+            s.object,
+            s.date,
+            s.lineage.first().map_or("?", String::as_str)
         ));
     }
     text
@@ -98,8 +135,9 @@ pub fn specifics_section(specifics: &[Specific]) -> String {
 /// SETTLE-1b (spec §5, test 13), deterministic, no judge. A rollup may not paraphrase a live
 /// specific its sources state:
 /// 1. a claim line not marked superseded or corrected, with the specific's subject and predicate
-///    (normalised as claim ids normalise them), must carry the specific's value as its object,
-///    exactly (outer space ignored);
+///    (normalised as claim ids normalise them) and a source in the specific's lineage (SETTLE-1g
+///    §1: shared provenance), must carry the specific's value as its object, exactly (outer
+///    space ignored); a claim sharing only subject and predicate is a claim of its own;
 /// 2. a line that names the specific's claim id must carry the value verbatim.
 ///
 /// Each breach is a problem, so the rollup fails validation and, after its attempts, is ROLLUP
@@ -113,7 +151,8 @@ pub fn check_specifics(v: &mut Validation, body: &str, specifics: &[Specific]) {
         for c in v.claims.iter().filter(|c| c.superseded_by.is_none()) {
             let same = claim::normalise_entity(&c.subject) == subject
                 && claim::normalise_predicate(&c.predicate) == predicate;
-            if same && c.object.trim() != s.object.trim() {
+            let shared = s.lineage.iter().any(|e| bare(e) == bare(&c.source));
+            if same && shared && c.object.trim() != s.object.trim() {
                 v.problems.push(format!(
                     "{}: restates the live specific {} ({} | {} | {}) as \"{}\": copy its value exactly and cite {}",
                     c.number, s.id, s.subject, s.predicate, s.object, c.object, s.id
@@ -123,7 +162,7 @@ pub fn check_specifics(v: &mut Validation, body: &str, specifics: &[Specific]) {
         for (i, line) in body.lines().enumerate() {
             if line.contains(&s.id) && !line.contains(s.object.trim()) {
                 v.problems.push(format!(
-                    "line {}: cites the live specific {} without its exact value \"{}\"",
+                    "line {}{CITES}{}{WITHOUT_VALUE}\"{}\"",
                     i + 1,
                     s.id,
                     s.object
@@ -131,6 +170,15 @@ pub fn check_specifics(v: &mut Validation, body: &str, specifics: &[Specific]) {
             }
         }
     }
+}
+const CITES: &str = ": cites the live specific ";
+const WITHOUT_VALUE: &str = " without its exact value ";
+/// `(line, handle)` of a "line <n>: cites the live specific <handle> without its exact value …"
+/// problem of [`check_specifics`], else `None` (SETTLE-1h: the problem repair mends).
+pub fn missing_value_of(problem: &str) -> Option<(usize, &str)> {
+    let (line, rest) = problem.strip_prefix("line ")?.split_once(CITES)?;
+    let (id, _) = rest.split_once(WITHOUT_VALUE)?;
+    Some((line.parse().ok()?, id))
 }
 #[derive(Debug, Default)]
 pub struct Validation {
@@ -217,7 +265,7 @@ fn check_supersedes(v: &mut Validation, body: &str, cluster: &Cluster, names: &[
     let entry = Entry::parse("candidate", body.into());
     for named in unlabelled_paragraphs(&entry, names) {
         v.problems.push(format!(
-            "Supersedes: a later paragraph names {} without a label; put referenced entries under \"{REFERENCED_ONLY_LABEL}\"",
+            "Supersedes: a later paragraph names {} without a label; list each referenced entry as \"- <file>\" under the line \"{REFERENCED_ONLY_LABEL}\" and name no entry elsewhere in the section (a reason goes on the entry's own line)",
             named.join(", ")
         ));
     }
@@ -430,7 +478,9 @@ mod tests {
             as_of: "2026-09-22",
         };
         let prompt = write_prompt("policy", &target, &cluster(), None);
-        assert!(prompt.contains(&format!("labelled exactly \"{REFERENCED_ONLY_LABEL}\"")));
+        assert!(prompt.contains(&format!(
+            "labelled exactly \"{REFERENCED_ONLY_LABEL}\", one \"- <file>\" line each"
+        )));
     }
     #[test]
     fn supersedes_rejects_no_compress_and_bookkeeping() {
@@ -455,6 +505,7 @@ mod tests {
             predicate: "is scheduled on".into(),
             object: "May 21".into(),
             date: "2031-04-03".into(),
+            lineage: vec![PRIMARY.into()],
         };
         let line = |object: &str| {
             format!(
@@ -494,5 +545,70 @@ mod tests {
         assert!(specifics_section(std::slice::from_ref(&specific)).contains(
             "- c_0123456789ab: Larkspur ferry inspection | is scheduled on | May 21 (2031-04-03)"
         ));
+    }
+    const ROLLUP: &str = "2031-04-09-dddddddddddd";
+    fn found_by_mira(source: &str) -> Vec<String> {
+        let entries = [
+            Entry::parse(PRIMARY, "# Mira at the quarry\nMira found a fossil.".into()),
+            Entry::parse(
+                ROLLUP,
+                format!(
+                    "# ROLLUP: quarry — state as of 2031-04-09\n## Supersedes\n- {PRIMARY}.md\n"
+                ),
+            ),
+        ];
+        let names = [PRIMARY, KEEP, ROLLUP].map(String::from);
+        let specific = Specific {
+            id: "c_aaaaaaaaaaaa".into(),
+            subject: "Mira".into(),
+            predicate: "found".into(),
+            object: "a fossil".into(),
+            date: "2031-04-03".into(),
+            lineage: lineage(
+                &format!("{PRIMARY}.md"),
+                &entries.iter().collect::<Vec<_>>(),
+                &names,
+            ),
+        };
+        let body =
+            format!("## Claims\n- C1. Mira | found | a lost key — 2031-04-04 — {source}.md\n");
+        let mut v = Validation {
+            claims: claim::parse(&body).claims,
+            ..Default::default()
+        };
+        check_specifics(&mut v, &body, &[specific]);
+        v.problems
+    }
+    /// SETTLE-1g §1: same subject and predicate pair a claim with a specific only on shared
+    /// provenance: the specific's source, or an entry in its lineage.
+    #[test]
+    fn a_claim_pairs_with_a_specific_only_on_shared_provenance() {
+        assert!(
+            found_by_mira(KEEP).is_empty(),
+            "a collision, not a restatement"
+        );
+        for source in [PRIMARY, ROLLUP] {
+            let problems = found_by_mira(source);
+            assert_eq!(problems.len(), 1, "{source}: {problems:?}");
+            assert!(problems[0].starts_with("C1: restates the live specific c_aaaaaaaaaaaa"));
+        }
+    }
+    #[test]
+    fn a_specifics_lineage_is_its_source_what_it_names_and_what_names_it() {
+        let names = [PRIMARY, KEEP, AUDIT, ROLLUP].map(String::from);
+        let source = Entry::parse(
+            KEEP,
+            format!(
+                "# Keep\n## Supersedes\n- {PRIMARY}.md\n\n{REFERENCED_ONLY_LABEL}\n- {AUDIT}.md\n"
+            ),
+        );
+        let carrier = Entry::parse(ROLLUP, format!("# ROLLUP: t\n## Supersedes\n- {KEEP}.md\n"));
+        let other = Entry::parse(PRIMARY, "# Other\nNo supersedes.".into());
+        let entries = [&source, &carrier, &other];
+        assert_eq!(
+            lineage(&format!("{KEEP}.md"), &entries, &names),
+            [KEEP, PRIMARY, AUDIT, ROLLUP]
+        );
+        assert_eq!(lineage(PRIMARY, &entries[2..], &names), [PRIMARY]);
     }
 }

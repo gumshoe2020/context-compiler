@@ -64,6 +64,10 @@ impl Run {
                 &self.live_specifics(job.cluster)?,
             ));
             let body = crate::rollup::normalise(&self.models.write.complete(&prompt)?);
+            let (body, mends) = rollup_repair::mend_layout(&body, &self.diary_names()?);
+            for mend in mends {
+                eprintln!("rollup: layout mended: {mend}");
+            }
             return self.validated(job, body, mode, 0);
         };
         self.repair(job, previous)
@@ -87,6 +91,8 @@ impl Run {
             Err(refusals) => Ok(refused_attempt(previous, refusals)),
         }
     }
+    /// Validates `body`; a cited live specific's missing value is mended (SETTLE-1h §1, no model
+    /// call), counted as repaired, and the mended body validated again in full.
     fn validated(
         &self,
         job: &Job,
@@ -95,13 +101,37 @@ impl Run {
         repaired: usize,
     ) -> Result<Attempt, Error> {
         let (validation, report) = self.validate(&body, job.target, job.cluster, job.evidence)?;
-        Ok(Attempt {
+        let mut attempt = Attempt {
             body,
             validation,
             report,
             mode,
             repaired,
-        })
+        };
+        let missing = |p: &String| rollup_validate::missing_value_of(p).is_some();
+        if attempt.validation.problems.iter().any(missing) {
+            self.mend_cited_values(job, &mut attempt)?;
+        }
+        Ok(attempt)
+    }
+    fn mend_cited_values(&self, job: &Job, attempt: &mut Attempt) -> Result<(), Error> {
+        let specifics = self.live_specifics(job.cluster)?;
+        let (body, mends) = rollup_repair::mend_cited_values(
+            &attempt.body,
+            &attempt.validation.problems,
+            &specifics,
+        );
+        if mends.is_empty() {
+            return Ok(());
+        }
+        for mend in &mends {
+            eprintln!("rollup: cited value mended: line {} {}", mend.line, mend.id);
+        }
+        (attempt.validation, attempt.report) =
+            self.validate(&body, job.target, job.cluster, job.evidence)?;
+        attempt.body = body;
+        attempt.repaired += mends.len();
+        Ok(())
     }
 }
 

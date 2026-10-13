@@ -1,0 +1,12 @@
+{
+ "entries": [],
+ "claims": [],
+ "relations": [],
+ "skipped": [
+  {"line": 3, "value": "Priya", "reason": "chatter"},
+  {"line": 3, "value": "Tomas", "reason": "chatter"},
+  {"line": 3, "value": "24th", "reason": "chatter"},
+  {"line": 4, "value": "@WEEKDAY@", "reason": "chatter"},
+  {"line": 4, "value": "10/17", "reason": "chatter"}
+ ]
+}

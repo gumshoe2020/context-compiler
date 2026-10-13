@@ -46,14 +46,16 @@ impl ClaimStore {
             .prepare("SELECT 1 FROM fidelity WHERE point=?1 AND file=?2")?
             .exists([point, file])?)
     }
-    /// The rows recorded at or after `since` (an ISO date or time), or in the last 30 days.
+    /// The rows recorded at or after `since` (an ISO date or time), or in the last 30 days, with
+    /// their items (JSON).
     pub fn fidelity_rows(&self, since: Option<&str>) -> Result<Vec<Value>, Error> {
         let mut s = self.store.connection.prepare(
-            "SELECT point,file,type,sampled,supported,missing,contradicted,unjudged,judge,at FROM fidelity WHERE at >= coalesce(?1, strftime('%Y-%m-%dT%H:%M:%S','now','-30 days')) ORDER BY at, rowid",
+            "SELECT point,file,type,sampled,supported,missing,contradicted,unjudged,judge,at,items FROM fidelity WHERE at >= coalesce(?1, strftime('%Y-%m-%dT%H:%M:%S','now','-30 days')) ORDER BY at, rowid",
         )?;
         let rows = s
             .query_map([since], |r| {
-                Ok(json!({"point":r.get::<_,String>(0)?,"file":r.get::<_,String>(1)?,"type":r.get::<_,String>(2)?,"sampled":r.get::<_,i64>(3)?,"supported":r.get::<_,i64>(4)?,"missing":r.get::<_,i64>(5)?,"contradicted":r.get::<_,i64>(6)?,"unjudged":r.get::<_,i64>(7)?,"judge":r.get::<_,String>(8)?,"at":r.get::<_,String>(9)?}))
+                let items: Value = serde_json::from_str(&r.get::<_, String>(10)?).unwrap_or(Value::Null);
+                Ok(json!({"point":r.get::<_,String>(0)?,"file":r.get::<_,String>(1)?,"type":r.get::<_,String>(2)?,"sampled":r.get::<_,i64>(3)?,"supported":r.get::<_,i64>(4)?,"missing":r.get::<_,i64>(5)?,"contradicted":r.get::<_,i64>(6)?,"unjudged":r.get::<_,i64>(7)?,"judge":r.get::<_,String>(8)?,"at":r.get::<_,String>(9)?,"items":items}))
             })?
             .collect::<Result<_, _>>()?;
         Ok(rows)

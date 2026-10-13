@@ -1,0 +1,23 @@
+{
+ "entries": [
+  {
+   "title": "News desk filing",
+   "body": "The news desk files tomorrow.",
+   "tags": [
+    "news-desk"
+   ]
+  }
+ ],
+ "claims": [
+  {
+   "kind": "specific",
+   "subject": "the news desk",
+   "predicate": "files",
+   "object": "on 2026-04-14, tomorrow",
+   "date": "2026-04-14",
+   "quote": "Tomorrow the news desk files on 2026-04-14",
+   "line": 2
+  }
+ ],
+ "relations": []
+}

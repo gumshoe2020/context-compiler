@@ -1,4 +1,6 @@
-//! `palace rollup`: prep → select → pull → write → validate → commit (PLAN M4b).
+//! `palace rollup`: prep → select → pull → write → validate → mark the sources it only references
+//! (SETTLE-1d §6) → commit (PLAN M4b). `--rescan-supersession <rollup>`: that marking alone, on a
+//! rollup already written.
 //! Exit 0 written / quiet / model bail / dry run; 4 validation failed on every attempt; 3 MemPalace
 //! unavailable at any stage (typed `Unavailable`); 2 any other broken run.
 use crate::watch::{self, Overlay};
@@ -9,6 +11,7 @@ use palace_core::{
     rollup::Entry,
     rollup_cluster::{self, Cluster, Request},
     rollup_keep,
+    rollup_membership::GenericTags,
     rollup_prep::{self, Recent},
     rollup_repair,
     rollup_select::{self, Selection},
@@ -70,6 +73,14 @@ pub struct Options {
     /// The wing `mempalace mine` files the rollup in (PKG-1.2 item 3).
     #[arg(long, default_value = palace_mempalace::mine::DEFAULT_WING, value_parser = crate::wing_name)]
     pub wing: String,
+    /// SETTLE-1d §6: apply "a rollup supersedes only what it keeps" to this rollup of the diary
+    /// (sources with an uncited live specific become referenced), then stop.
+    #[arg(long)]
+    pub rescan_supersession: Option<PathBuf>,
+    /// SETTLE-1f §2 (`ROLLUP_MAX_CLUSTER`): a thread whose cluster holds more entries is skipped
+    /// (`ROLLUP SKIP thread=<t> cluster=<n> over the cap`, exit 0, a `rollup_skip` event).
+    #[arg(long, default_value_t = rollup_cluster::MAX_CLUSTER as u64, value_parser = clap::value_parser!(u64).range(1..))]
+    pub max_cluster: u64,
     #[command(flatten)]
     pub connection: crate::MemPalaceOptions,
 }
@@ -108,8 +119,12 @@ pub(crate) struct Run {
     pub(crate) policy: String,
     pub(crate) models: Backends,
     canaries: Vec<Canary>,
+    generic: GenericTags,
 }
 pub fn run(options: Options) -> Result<i32, Error> {
+    if let Some(file) = &options.rescan_supersession {
+        return crate::rollup_reference::rescan(&options, file);
+    }
     let root = crate::paths::diary_root(&options.diary)?;
     let diary = Diary::open(&root.join("diary"))?;
     let keep = options
@@ -142,9 +157,32 @@ pub fn run(options: Options) -> Result<i32, Error> {
         as_of,
         models,
         canaries,
+        generic: generic_tags(&prompts)?,
     };
     run.stages(&recent)
 }
+/// SETTLE-1f §2: `<prompts>/rollup-generic-tags.json`, read on every run; when there is no such
+/// file, the copy built in.
+fn generic_tags(prompts: &Path) -> Result<GenericTags, Error> {
+    let file = prompts.join("rollup-generic-tags.json");
+    let text = match file.exists() {
+        true => fs::read_to_string(crate::paths::input(&file)?)?,
+        false => {
+            eprintln!(
+                "palace: {} not found: the built-in generic tag list is used",
+                file.display()
+            );
+            BUILT_IN_GENERIC_TAGS.to_owned()
+        }
+    };
+    let (person, assistant) = (
+        palace_core::names::person(),
+        palace_core::names::assistant(),
+    );
+    GenericTags::parse(&text, person, assistant)
+        .map_err(|e| format!("{}: {e}", file.display()).into())
+}
+const BUILT_IN_GENERIC_TAGS: &str = include_str!("../../../prompts/rollup-generic-tags.json");
 /// `--keep`: refused inside the diary root or the palace (M5b-11 item 4: `mempalace mine` would
 /// index the kept attempts, and `diary/` would list them), then confined like every output.
 fn keep_dir(dir: &Path, root: &Path, palace: &Path) -> Result<PathBuf, Error> {
@@ -234,6 +272,9 @@ impl Run {
         }
         let evidence = self.connect()?;
         let cluster = self.pull(&target, &tags, &evidence)?;
+        if cluster.size() as u64 > self.options.max_cluster {
+            return self.skip(&thread, cluster.size());
+        }
         let job = crate::rollup_write::Job {
             target: &target,
             cluster: &cluster,
@@ -252,13 +293,36 @@ impl Run {
             println!("{}", serde_json::to_string_pretty(&last.report)?);
             return Ok(EXIT_INVALID);
         }
-        let (body, report) = (&last.body, &last.report);
+        let report = &last.report;
+        // SETTLE-1d §6: a source whose live specifics the claims do not keep is referenced.
+        let names = self.diary.names()?;
+        let (body, _) = crate::rollup_reference::mark(&self.options.kg, &names, &last.body)?;
+        let body = &body;
         if self.options.dry_run {
             println!("{body}\n{}", serde_json::to_string_pretty(&report)?);
             return Ok(0);
         }
         drop(evidence); // mempalace-mcp must not hold the palace open while mine writes it
         crate::rollup_commit::commit(self.commit_inputs(&thread), body)
+    }
+    /// SETTLE-1f §2: the cluster is over the cap, so the thread is refused; the night goes on.
+    /// Logged as a `rollup_skip` event for the digest when the claim store exists (not in a dry
+    /// run, which writes nothing).
+    fn skip(&self, thread: &str, size: usize) -> Result<i32, Error> {
+        let cap = self.options.max_cluster;
+        let line = format!("ROLLUP SKIP thread={thread} cluster={size} over the cap");
+        let store = crate::rollup_commit::compiler_path(&self.options.kg)?;
+        if !self.options.dry_run && store.is_file() {
+            let at = palace_core::diary_file::iso_millis(now_millis()?);
+            palace_store::claims::ClaimStore::open(&store)?.log(&json!({
+                "operation": "rollup_skip", "thread": thread, "cluster": size, "cap": cap,
+                "as_of": self.as_of, "at": &at[..19]}))?;
+        }
+        println!("{line}");
+        Ok(0)
+    }
+    pub(crate) fn diary_names(&self) -> Result<Vec<String>, Error> {
+        self.diary.names()
     }
     fn connect(&self) -> Result<Evidence, Error> {
         let diary = self.root.join("diary");
@@ -292,6 +356,7 @@ impl Run {
             thread: target.thread,
             tags,
             as_of: &self.as_of,
+            generic: &self.generic,
         };
         let cluster = rollup_cluster::pull(&self.diary, &evidence.searcher, &request)
             .map_err(|e| transport_or(evidence, e))?;
@@ -365,24 +430,32 @@ impl Run {
             .iter()
             .map(rollup_repair::ClaimProblem::to_json)
             .collect();
-        let report = json!({"passed":v.passed(),"problems":v.problems,"claim_problems":claim_problems,"claims":v.claims.len(),"relations":v.relations.len(),"gate":gate,"superseded":v.superseded,"fidelity":fidelity,"cluster":cluster.members.iter().map(|m| json!({"name":m.entry.name,"role":m.label()})).collect::<Vec<_>>()});
+        let report = json!({"passed":v.passed(),"problems":v.problems,"claim_problems":claim_problems,"claims":v.claims.len(),"relations":v.relations.len(),"gate":gate,"superseded":v.superseded,"fidelity":fidelity,"cluster":cluster.members.iter().map(|m| json!({"name":m.entry.name,"role":m.label(),"joined_by":cluster.joined_by.get(&m.entry.name)})).collect::<Vec<_>>()});
         Ok((v, report))
     }
     /// SETTLE-1b (spec §5): the live specifics the cluster's entries state (none before the
-    /// claim store exists, or when no entry of the cluster was distilled).
+    /// claim store exists, or when no entry of the cluster was distilled), each with its lineage
+    /// among the members and the prior rollups (SETTLE-1g §1).
     pub(crate) fn live_specifics(&self, cluster: &Cluster) -> Result<Vec<Specific>, Error> {
         let store = crate::rollup_commit::compiler_path(&self.options.kg)?;
         if !store.is_file() {
             return Ok(Vec::new());
         }
-        let names: Vec<String> = cluster
+        let members: Vec<String> = cluster
             .members
             .iter()
             .map(|m| m.entry.name.clone())
             .collect();
+        let rows = palace_store::claims::ClaimStore::open(&store)?.live_specifics(&members)?;
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+        let priors = self.prior_rollup_entries(cluster)?;
+        let mut entries: Vec<&Entry> = cluster.members.iter().map(|m| &m.entry).collect();
+        entries.extend(priors.iter());
+        let names = self.diary.names()?;
         let text = |row: &Value, key: &str| row[key].as_str().unwrap_or_default().to_owned();
-        Ok(palace_store::claims::ClaimStore::open(&store)?
-            .live_specifics(&names)?
+        Ok(rows
             .iter()
             .map(|row| Specific {
                 id: text(row, "id"),
@@ -390,8 +463,18 @@ impl Run {
                 predicate: text(row, "predicate"),
                 object: text(row, "object"),
                 date: text(row, "date"),
+                lineage: rollup_validate::lineage(&text(row, "entry"), &entries, &names),
             })
             .collect())
+    }
+    fn prior_rollup_entries(&self, cluster: &Cluster) -> Result<Vec<Entry>, Error> {
+        let mut entries = Vec::new();
+        for name in &cluster.prior_rollups {
+            if let Some(text) = self.diary.read(name)? {
+                entries.push(Entry::parse(name, text));
+            }
+        }
+        Ok(entries)
     }
     /// Floor, depth and (with a judge) canaries on the candidate text.
     fn fidelity(&self, body: &str, v: &mut Validation) -> Result<Value, Error> {
@@ -424,6 +507,7 @@ impl Run {
             thread: &model,
             tags: &[],
             as_of: &self.as_of,
+            generic: &Default::default(),
         };
         let priors = rollup_cluster::prior_rollups(&self.diary, &self.diary.names()?, &request)?;
         Ok(

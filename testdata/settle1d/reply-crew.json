@@ -1,0 +1,13 @@
+{
+ "entries": [
+  {
+   "title": "Larkspur ferry inspection",
+   "body": "Tobiah Quell moved the Larkspur ferry inspection to May 21; Wenna Ostrow confirmed the new date with the harbour office.",
+   "tags": ["larkspur-ferry", "inspection", "wenna-ostrow"]
+  }
+ ],
+ "claims": [
+  {"kind": "specific", "subject": "Larkspur ferry inspection", "predicate": "is scheduled on", "object": "May 21", "date": "2031-04-03", "quote": "the inspection moves to May 21", "line": 1}
+ ],
+ "relations": []
+}
