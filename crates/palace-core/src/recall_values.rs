@@ -19,6 +19,9 @@
 //! A value that is part of a date in the sentence (`10/17`, `2026-10-17`, `Oct 17`, `17 October`,
 //! `Saturday the 17th`, a weekday before any of them; no year: the run's) is also kept when a
 //! specific's `date`, or a date in its text, is that calendar date.
+//!
+//! **Kept anywhere** (SETTLE-1i §1). The same rules over everything the run filed: its specifics,
+//! then its concepts, then its entries; the first that holds a value is where it was kept.
 use crate::diary_file::{civil_from_days, days_from_civil};
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -421,6 +424,15 @@ impl Specifics {
         }
         specifics
     }
+
+    /// Whether this text keeps the (folded) value: as a whole token, or as part of a date of the
+    /// sentence (`dated`) that it names.
+    fn keeps(&self, folded: &str, dated: &[(Day, Vec<String>)]) -> bool {
+        let by_date = dated
+            .iter()
+            .any(|(d, said)| said.iter().any(|w| w == folded) && self.dates.contains(d));
+        by_date || has_token(&self.text, folded)
+    }
 }
 
 /// Each value of the sentence and whether the specifics keep it (see the module notes).
@@ -434,12 +446,41 @@ pub fn kept_values(
     values(sentence, common)
         .into_iter()
         .map(|value| {
-            let folded = fold(&value);
-            let by_date = dated
-                .iter()
-                .any(|(d, said)| said.contains(&folded) && specifics.dates.contains(d));
-            let kept = by_date || has_token(&specifics.text, &folded);
+            let kept = specifics.keeps(&fold(&value), &dated);
             (value, kept)
+        })
+        .collect()
+}
+
+/// Where a value counts as kept (SETTLE-1i §1), in the order they are tried.
+pub const KEPT_IN: [&str; 3] = ["specific", "concept", "entry"];
+
+/// Everything one distill run filed (SETTLE-1i §1), each part read as [`Specifics`] are: its
+/// specifics and its concepts (subject, object, quote, with their dates) and its entries (title
+/// and body, dated by the run).
+#[derive(Clone, Debug, Default)]
+pub struct Filed {
+    pub specifics: Specifics,
+    pub concepts: Specifics,
+    pub entries: Specifics,
+}
+
+/// Each value of the sentence and where the run filed it, under the same whole-token and date
+/// rules: the first of [`KEPT_IN`] that holds it, `None` when nothing does.
+pub fn kept_in(
+    sentence: &str,
+    filed: &Filed,
+    common: &CommonWords,
+    run: Day,
+) -> Vec<(String, Option<&'static str>)> {
+    let dated = dates(sentence, run);
+    let parts = [&filed.specifics, &filed.concepts, &filed.entries];
+    values(sentence, common)
+        .into_iter()
+        .map(|value| {
+            let folded = fold(&value);
+            let at = parts.iter().position(|p| p.keeps(&folded, &dated));
+            (value, at.map(|i| KEPT_IN[i]))
         })
         .collect()
 }
@@ -655,6 +696,37 @@ mod tests {
         );
         assert!(!has_token("ctx-1", "ctx") && has_token("ctx-1.", "ctx-1"));
         assert!(has_token("(tom)", "tom") && !has_token("atom", "tom"));
+    }
+    #[test]
+    fn a_value_is_kept_where_the_run_filed_it_first() {
+        let c = common();
+        let filed = Filed {
+            specifics: Specifics::new([("Ravi takes the swap", "")], RUN),
+            concepts: Specifics::new([("Ravi and Theo argue over Larkspur", "2026-10-17")], RUN),
+            entries: Specifics::new(
+                [("Rota\nTheo, Wenna and 3,200 crowns; see the calendar", "")],
+                RUN,
+            ),
+        };
+        let sentence = "So Ravi, Theo, Wenna and Cal meet on 10/17 at Larkspur.";
+        assert_eq!(
+            kept_in(sentence, &filed, &c, RUN),
+            [
+                ("Ravi".into(), Some("specific")),
+                ("Theo".into(), Some("concept")),
+                ("Wenna".into(), Some("entry")),
+                ("Cal".into(), None),
+                ("10/17".into(), Some("concept")),
+                ("Larkspur".into(), Some("concept")),
+            ]
+        );
+        assert!(kept_in("No values here.", &filed, &c, RUN).is_empty());
+        let nothing = Filed::default();
+        assert!(
+            kept_in(sentence, &nothing, &c, RUN)
+                .iter()
+                .all(|(_, at)| at.is_none())
+        );
     }
     #[test]
     fn the_word_list_parses_and_refuses_bad_shapes() {

@@ -15,6 +15,9 @@ pub const DISTILL_SPECIFIC_SAMPLE: usize = 20;
 /// The `judge` of a distill-point specifics row scored per value (SETTLE-1d §2); older rows say
 /// `rule:exact` (per sentence) and are never pooled with these.
 pub const RULE_VALUES: &str = "rule:values";
+/// The `judge` of a distill-point specifics row scored per value, a value kept when anything the
+/// run filed holds it (SETTLE-1i §2); never pooled with `rule:values` rows.
+pub const RULE_VALUES_ANYWHERE: &str = "rule:values-anywhere";
 /// `DISTILL_RECALL_MIN_WORDS` (SETTLE-1c §1): a distill-point concept sample draws only from
 /// messages with at least this many words.
 pub const DISTILL_MIN_WORDS: usize = 8;
@@ -77,7 +80,8 @@ fn push_sentence(out: &mut Vec<String>, text: &str) {
 }
 
 pub use crate::recall_values::{
-    CommonWords, Day, Specifics, kept_values, prose, specific_verdict, values,
+    CommonWords, Day, Filed, KEPT_IN, Specifics, kept_in, kept_values, prose, specific_verdict,
+    values,
 };
 
 /// A judge's answer as a recall verdict: `supported`, `missing` or `contradicted` (the watch's
@@ -206,32 +210,43 @@ pub fn page_reason(point: &str, kind: &str, counts: &Counts, floor: f64) -> Opti
 /// The skip rate above which the digest flags the 7 days' skips (SETTLE-1d §5).
 pub const SKIP_FLAG: f64 = 0.5;
 
-/// The digest's line (SETTLE-1d §4, §5), `F: specifics 41/52 values (78%, 7d), unexplained 3/52,
-/// skipped 12/60 (20%), concepts 9/10 (7d) (30-day 0.87)`, when the digest's window holds a check
-/// (`window`): the specifics pooled over the last 7 days' distill-point rows scored per value
-/// (`week`, `rule:values` only: older per-sentence rows are never pooled with them), the missing
-/// values the distiller did not skip, the values it skipped of those its checklists listed
-/// (flagged above [`SKIP_FLAG`]), the concepts over the same days' distill-point rows, and the
-/// 30-day concept figure over every concept row (`month`). Rows carry `point`, `type`, `judge`,
-/// `sampled`, `supported`, `unjudged` and `items`.
+/// The digest's line (SETTLE-1d §4, §5; SETTLE-1i §2), `F: specifics 41/52 values (78%, 7d; 30
+/// as specifics), unexplained 3/52, skipped 12/60 (20%), concepts 9/10 (7d) (30-day 0.87)`, when
+/// the digest's window holds a check (`window`): the specifics pooled over the last 7 days'
+/// distill-point rows scored per value (`week`), with how many were kept as specifics; the
+/// missing values the distiller did not skip, the values it skipped of those its checklists
+/// listed (flagged above [`SKIP_FLAG`]), the concepts over the same days' distill-point rows,
+/// and the 30-day concept figure over every concept row (`month`). The specifics pool only
+/// `rule:values-anywhere` rows; a week with none pools its `rule:values` rows as before, without
+/// the "as specifics" part (the two, and older per-sentence rows, are never pooled together).
+/// Rows carry `point`, `type`, `judge`, `sampled`, `supported`, `unjudged` and `items`.
 pub fn digest_line(window: &[Value], week: &[Value], month: &[Value]) -> Option<String> {
     if window.is_empty() {
         return None;
     }
     let distill =
         |kind: &'static str| move |r: &&Value| r["point"] == "distill" && r["type"] == kind;
-    let values: Vec<&Value> = week
-        .iter()
-        .filter(distill("specific"))
-        .filter(|r| r["judge"] == RULE_VALUES)
-        .collect();
+    let scored = |rule: &str| -> Vec<&Value> {
+        week.iter()
+            .filter(distill("specific"))
+            .filter(|r| r["judge"] == rule)
+            .collect()
+    };
+    let (values, anywhere) = match scored(RULE_VALUES_ANYWHERE) {
+        rows if rows.is_empty() => (scored(RULE_VALUES), false),
+        rows => (rows, true),
+    };
     let specifics = match sum(&values, "sampled") {
         0 => "-".to_owned(),
         n => {
             let kept = sum(&values, "supported");
             let unexplained = items_sum(&values, "values_unexplained");
+            let as_specifics = match anywhere {
+                true => format!("; {} as specifics", kept_as_specifics(&values)),
+                false => String::new(),
+            };
             format!(
-                "{kept}/{n} values ({}%, 7d), unexplained {unexplained}/{n}, skipped {}",
+                "{kept}/{n} values ({}%, 7d{as_specifics}), unexplained {unexplained}/{n}, skipped {}",
                 kept * 100 / n,
                 skip_rate(&values)
             )
@@ -269,6 +284,16 @@ fn skip_rate(rows: &[&Value]) -> String {
         "{skipped}/{listed} ({}%{flag})",
         (rate * 100.0).round() as u64
     )
+}
+/// The values the rows kept in specifics (`items.values_kept_in.specific`, SETTLE-1i §2).
+fn kept_as_specifics(rows: &[&Value]) -> u64 {
+    rows.iter()
+        .map(|r| {
+            r["items"]["values_kept_in"]["specific"]
+                .as_u64()
+                .unwrap_or(0)
+        })
+        .sum()
 }
 fn items_sum(rows: &[&Value], field: &str) -> u64 {
     rows.iter()
@@ -418,5 +443,27 @@ mod tests {
                 .contains("unexplained 0/30, skipped -,")
         );
         assert_eq!(digest_line(&[], &week, &month), None);
+    }
+    #[test]
+    fn the_digest_pools_kept_anywhere_rows_apart_and_shows_the_specifics_share() {
+        let row = |judge: &str, n: u64, s: u64, as_specifics: u64| {
+            json!({"point":"distill","type":"specific","judge":judge,"sampled":n,"supported":s,
+                "unjudged":0,"items":{"values_unexplained":n - s,"values_skipped":2,"checklist_values":10,
+                "values_kept_in":{"specific":as_specifics,"concept":s - as_specifics,"entry":0}}})
+        };
+        let week = [
+            row(RULE_VALUES, 50, 10, 10),
+            row(RULE_VALUES_ANYWHERE, 40, 30, 12),
+            row(RULE_VALUES_ANYWHERE, 20, 15, 8),
+        ];
+        assert_eq!(
+            digest_line(&week[..1], &week, &[]).unwrap(),
+            "F: specifics 45/60 values (75%, 7d; 20 as specifics), unexplained 15/60, skipped 4/20 (20%), concepts unjudged (7d) (30-day -)"
+        );
+        assert_eq!(
+            digest_line(&week[..1], &week[..1], &[]).unwrap(),
+            "F: specifics 10/50 values (20%, 7d), unexplained 40/50, skipped 2/10 (20%), concepts unjudged (7d) (30-day -)",
+            "a week of rule:values rows only reads as before"
+        );
     }
 }

@@ -10,7 +10,9 @@
 //! `--min-words` or more, and the judge sees each with the messages after it, judging the final
 //! state; a `not_applicable` item stays in the row's items but out of `sampled`. Its specifics
 //! sample (SETTLE-1d §2) draws up to `--specific-sample` sentences that carry a value and scores
-//! each value (`judge` `rule:values`: its `sampled`/`supported` count values).
+//! each value (`judge` `rule:values`: its `sampled`/`supported` count values). Since SETTLE-1i a
+//! value is kept when anything the run filed holds it, its specifics, concepts or entries, and
+//! each kept value records where (`kept_in`); the row is `judge` `rule:values-anywhere`.
 //! Exit 0 (whatever it measured), 2 broken.
 use clap::Args;
 use palace_core::{
@@ -93,6 +95,14 @@ pub struct Options {
     /// (by file name), to drop code from the stored sentences and size each run's checklist.
     #[arg(long, requires = "replay_values")]
     pub transcripts: Option<PathBuf>,
+    /// With `--replay-values` (SETTLE-1i): a directory holding copies of the entries the rows'
+    /// runs wrote (by file name), checked against the entries scored.
+    #[arg(long, requires = "replay_values")]
+    pub written: Option<PathBuf>,
+    /// With `--replay-values` (SETTLE-1i): only the rows written on or after this time
+    /// (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SS`, as stored).
+    #[arg(long, requires = "replay_values")]
+    pub since: Option<String>,
 }
 
 pub fn run(options: Options) -> i32 {
@@ -109,7 +119,12 @@ fn measure(options: &Options) -> Result<(), Error> {
     if options.target.replay_values {
         let store = ClaimStore::open(&crate::rollup_commit::compiler_path(&options.kg)?)?;
         let common = common_words(&options.prompts)?;
-        return crate::fidelity_replay::replay(&store, &common, options.transcripts.as_deref());
+        let copies = crate::fidelity_replay::Copies {
+            transcripts: options.transcripts.as_deref(),
+            written: options.written.as_deref(),
+            since: options.since.as_deref(),
+        };
+        return crate::fidelity_replay::replay(&store, &common, &copies);
     }
     let root = crate::paths::diary_root(&options.diary)?;
     let diary = Diary::open(&root.join("diary"))?;
@@ -241,7 +256,7 @@ impl Check {
     }
     fn judge_label<'a>(&self, judge: &'a Judge) -> &'a str {
         match (self.kind, self.point) {
-            ("specific", "distill") => recall::RULE_VALUES,
+            ("specific", "distill") => recall::RULE_VALUES_ANYWHERE,
             ("specific", _) => "rule:exact",
             _ => &judge.label,
         }
@@ -435,10 +450,32 @@ pub(crate) fn run_specifics(
     reply: &palace_core::distill::Reply,
     run: recall::Day,
 ) -> recall::Specifics {
+    claims_text(reply, run, |kind| kind == "specific")
+}
+/// Everything the run filed (SETTLE-1i §1): its specifics, its concepts (subject, object and
+/// quote, with their dates) and its entries (title and body).
+pub(crate) fn run_filed(reply: &palace_core::distill::Reply, run: recall::Day) -> recall::Filed {
+    let entries: Vec<String> = reply
+        .entries
+        .iter()
+        .map(|e| format!("{}\n{}", e.title, e.body))
+        .collect();
+    recall::Filed {
+        specifics: run_specifics(reply, run),
+        concepts: claims_text(reply, run, |kind| kind != "specific"),
+        entries: recall::Specifics::new(entries.iter().map(|e| (e.as_str(), "")), run),
+    }
+}
+/// The text of the run's claims of the kinds `wanted` picks, read as specifics are.
+fn claims_text(
+    reply: &palace_core::distill::Reply,
+    run: recall::Day,
+    wanted: impl Fn(&str) -> bool,
+) -> recall::Specifics {
     let texts: Vec<(String, &str)> = reply
         .claims
         .iter()
-        .filter(|c| c.kind == "specific")
+        .filter(|c| wanted(&c.kind))
         .map(|c| {
             let quote = c.quote.as_deref().unwrap_or("");
             (
@@ -450,8 +487,10 @@ pub(crate) fn run_specifics(
     recall::Specifics::new(texts.iter().map(|(t, d)| (t.as_str(), *d)), run)
 }
 /// The distill-point specifics (SETTLE-1d §2): up to `--specific-sample` sentences of the range
-/// (both roles, code dropped first: SETTLE-1e §1) that carry a value, each value kept by the run's specifics or `missing`; the row
-/// counts values, not sentences (`rule:values`), and its items record the totals.
+/// (both roles, code dropped first: SETTLE-1e §1) that carry a value, each value kept by what the
+/// run filed (SETTLE-1i §1: its specifics, concepts or entries, recorded as `kept_in`) or
+/// `missing`; the row counts values, not sentences (`rule:values-anywhere`), and its items record
+/// the totals, with where the kept values were (`values_kept_in`).
 fn distilled_specifics(
     range: &str,
     turns: &[Turn],
@@ -459,7 +498,7 @@ fn distilled_specifics(
     rule: &ValueRule,
 ) -> Check {
     let (common, run) = (rule.common, rule.run);
-    let specifics = run_specifics(reply, run);
+    let filed = run_filed(reply, run);
     let carrying: Vec<(usize, String)> = turns
         .iter()
         .flat_map(|t| {
@@ -473,8 +512,17 @@ fn distilled_specifics(
     let mut check = Check::new("distill", range, "specific");
     let key = |(line, s): &(usize, String)| format!("{line}:{s}");
     let mut unexplained = 0;
+    let mut held = [0usize; recall::KEPT_IN.len()];
     for (line, sentence) in recall::sample(range, &carrying, key, rule.sample) {
-        let kept = recall::kept_values(&sentence, &specifics, common, run);
+        let found = recall::kept_in(&sentence, &filed, common, run);
+        let kept: Vec<(String, bool)> = found
+            .iter()
+            .map(|(v, at)| (v.clone(), at.is_some()))
+            .collect();
+        let kept_in: Vec<&str> = found.iter().filter_map(|(_, at)| *at).collect();
+        for at in &kept_in {
+            held[recall::KEPT_IN.iter().position(|k| k == at).unwrap_or(0)] += 1;
+        }
         let values: Vec<&str> = kept.iter().map(|(v, _)| v.as_str()).collect();
         let explained: Vec<&str> = kept
             .iter()
@@ -483,12 +531,19 @@ fn distilled_specifics(
             .collect();
         unexplained += kept.iter().filter(|(_, k)| !k).count() - explained.len();
         check.add_values(
-            json!({"line": line, "sentence": sentence, "values": values, "skipped": explained}),
+            json!({"line": line, "sentence": sentence, "values": values, "skipped": explained,
+                "kept_in": kept_in}),
             &kept,
         );
     }
     let c = &check.counts;
+    let kept_in: serde_json::Map<String, Value> = recall::KEPT_IN
+        .iter()
+        .zip(held)
+        .map(|(k, n)| ((*k).to_owned(), json!(n)))
+        .collect();
     check.items = json!({"values_sampled": c.sampled, "values_kept": c.supported,
+        "values_kept_in": kept_in,
         "values_missing": c.missing, "values_unexplained": unexplained,
         "values_skipped": reply.skipped.len(), "checklist_values": rule.listed,
         "sentences": carrying.len(), "items": check.items});
@@ -784,7 +839,33 @@ mod tests {
             check.items["items"][1]["kept"],
             json!(["Saturday", "10/17"])
         );
-        assert_eq!(check.judge_label(&Judge::none()), "rule:values");
+        assert_eq!(
+            check.items["items"][1]["kept_in"],
+            json!(["specific", "specific"])
+        );
+        assert_eq!(check.judge_label(&Judge::none()), "rule:values-anywhere");
+        let mut concept = specific("Ravi's swap with Theo", "Ravi takes the 24th", "");
+        concept.kind = "concept".into();
+        let elsewhere = Reply {
+            claims: vec![concept],
+            entries: vec![palace_core::distill::DistilledEntry {
+                title: "Rota".into(),
+                body: "The crew meets Saturday, 10/17.".into(),
+                tags: vec![],
+            }],
+            ..Reply::default()
+        };
+        let check = distilled_specifics("t.jsonl:1-3", &turns, &elsewhere, &rule);
+        assert_eq!((check.counts.sampled, check.counts.supported), (5, 5));
+        assert_eq!(
+            check.items["values_kept_in"],
+            json!({"specific": 0, "concept": 3, "entry": 2})
+        );
+        assert_eq!(
+            check.items["items"][1]["kept_in"],
+            json!(["entry", "entry"])
+        );
+        assert_eq!(check.items["values_unexplained"], 0);
         let mut consolidation = Check::new("consolidation", "r.md", "specific");
         consolidation.add(json!({}), Some("supported"));
         assert_eq!(consolidation.judge_label(&Judge::none()), "rule:exact");

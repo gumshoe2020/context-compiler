@@ -225,7 +225,7 @@ One uninstall serves both installers (`$CC_HOME/codex-env.sh`, `$CC_HOME/claude-
 ## Not verified yet
 
 Checked against stand-ins only: the repository's acceptance test (not shipped), with the real
-MemPalace 3.5.0 in fake homes and a stand-in model, ends `SETTLE1H OK`. A test with real Codex in a fresh account comes
+MemPalace 3.5.0 in fake homes and a stand-in model, ends `SETTLE1I OK`. A test with real Codex in a fresh account comes
 next. Shown with real Codex 0.154 before: the UserPromptSubmit hook's JSON reaches the model;
 MCP tools need the approval tables; `--ignore-user-config` alone leaves the account's apps on
 (hence codex-llm.sh's four `--disable` flags). Still open: SessionStart's JSON as context;

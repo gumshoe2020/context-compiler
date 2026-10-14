@@ -1,0 +1,13 @@
+{
+ "entries": [
+  {
+   "title": "Harbour accounts",
+   "body": "Halloran paid 4,750 marks at Pellridge; the letter question goes on the calendar.",
+   "tags": ["harbour-accounts"]
+  }
+ ],
+ "claims": [
+  {"kind": "concept", "subject": "Brannoch", "predicate": "argues", "object": "Vessa wrote the Ostmere letter", "date": "2031-07-14", "line": 1}
+ ],
+ "relations": []
+}
