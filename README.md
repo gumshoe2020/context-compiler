@@ -56,6 +56,15 @@ memory records: you correct it and answer its asks; the assistant keeps the queu
 private wing never recalled automatically), `--no-load` (write the launchd jobs without loading
 them). `dist/README.md` has the full reference, removal included (`dist/common/uninstall.sh`).
 
+### With Nix
+
+With Nix and flakes enabled, `nix build` produces `result/bin/palace` and
+`result/bin/palace-mcp`. `nix develop` provides the pinned Rust toolchain and
+development tools; `nix flake check` runs the sandboxed checks. Apple silicon
+macOS is tested; the other declared platforms are evaluated only. See
+[docs/NIX.md](docs/NIX.md) for test exclusions and updating the lock. Nix builds
+the binaries; installing MemPalace and assistant integrations is a separate step.
+
 ## Commands
 
 The `palace` binary (`palace <command> --help` for each). A build from this tree has no default
