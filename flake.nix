@@ -95,6 +95,9 @@
               commonArgs
               // {
                 inherit cargoArtifacts;
+                # The same features as the shipped release (dist/build-release.sh): no acceptance
+                # doctors, no compiled-in owner names. Override cargoExtraArgs to build otherwise.
+                cargoExtraArgs = "--locked --no-default-features";
                 doCheck = false;
                 meta = {
                   description = "A memory compiler for coding and chat assistants";

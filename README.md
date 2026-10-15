@@ -120,6 +120,15 @@ models). `testdata/` holds the synthetic fixtures. This repository is an export 
 private one (which also holds acceptance tests on a real palace); history starts at the first
 export.
 
+## Background
+
+The idea for compiling context, rather than just storing and searching it, came from el gato
+malo's essay [The geometry of relational intelligence](https://boriquagato.substack.com/p/the-geometry-of-relational-intelligence).
+It argues that effective capacity is working memory × compression × fidelity, and that a compressed
+concept becomes an axis other concepts are hung on, so a small error rotates everything built on
+it. That is why this compiler keeps every exact fact as a verbatim quote with its source, and checks
+every summary against those sources before accepting it.
+
 ## License
 
 MIT, see `LICENSE`.
