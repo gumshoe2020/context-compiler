@@ -25,7 +25,7 @@ pub fn mark(kg: &Path, names: &[String], body: &str) -> Result<(String, Vec<Unci
     let sources = superseded_sources(&entry, names).resolved;
     let uncited = rollup_reference::referenced(&entry, names, &live_specifics(kg, &sources)?);
     for u in &uncited {
-        eprintln!(
+        privacy_log!(
             "rollup: references {} instead of superseding it: its live specifics {} are neither kept nor cited",
             u.entry,
             u.claims.join(", ")
@@ -56,7 +56,12 @@ fn live_specifics(kg: &Path, entries: &[String]) -> Result<Vec<LiveSpecific>, Er
 /// line (prefixed `DRY RUN` in a dry run, which changes nothing); exit 0 (changed or not).
 pub fn rescan(options: &crate::rollup::Options, file: &Path) -> Result<i32, Error> {
     let root = crate::paths::diary_root(&options.diary)?;
-    let diary = Diary::open(&root.join("diary"))?;
+    let mut diary = Diary::open(&root.join("diary"))?;
+    crate::privacy::filter_audience_diary(
+        &mut diary,
+        &crate::rollup_commit::compiler_path(&options.kg)?,
+        &options.exact_audience,
+    )?;
     let name = file
         .file_name()
         .and_then(|n| n.to_str())
@@ -73,7 +78,7 @@ pub fn rescan(options: &crate::rollup::Options, file: &Path) -> Result<i32, Erro
     let marked = rollup_reference::layout(&marked, &names);
     let dry = if options.dry_run { "DRY RUN " } else { "" };
     if marked == text && uncited.is_empty() {
-        println!("{dry}ROLLUP rescan {name}.md: no change");
+        privacy_print!("{dry}ROLLUP rescan {name}.md: no change");
         return Ok(0);
     }
     if marked == text {
@@ -87,7 +92,7 @@ pub fn rescan(options: &crate::rollup::Options, file: &Path) -> Result<i32, Erro
         false => format!("ROLLUP rescan {name}.md: referenced {}", entries.join(", ")),
     };
     if options.dry_run {
-        println!("{dry}{line}");
+        privacy_print!("{dry}{line}");
         return Ok(0);
     }
     let path = crate::paths::database(&root.join("diary").join(format!("{name}.md")))?;
@@ -103,7 +108,7 @@ pub fn rescan(options: &crate::rollup::Options, file: &Path) -> Result<i32, Erro
         "operation": "rollup_rescan", "file": format!("{name}.md"), "referenced": referenced,
         "before_sha256": sha(&text), "after_sha256": sha(&marked)}))?;
     mine(options, &root)?;
-    println!("{line}");
+    privacy_print!("{line}");
     Ok(0)
 }
 fn mine(options: &crate::rollup::Options, root: &Path) -> Result<(), Error> {

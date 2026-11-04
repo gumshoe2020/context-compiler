@@ -48,6 +48,15 @@ impl ReplyTool {
         let o = &self.options;
         let mut command = Command::new(&o.palace_bin);
         command.args(["--person", &o.person, "--assistant", &o.assistant]);
+        if let Some(session) = palace_store::privacy::conversation_id() {
+            command.arg("--conversation").arg(session);
+        }
+        if let Some(root) = o.palace.parent() {
+            let people = root.join("people.json");
+            if people.is_file() {
+                command.arg("--people-map").arg(people);
+            }
+        }
         if let Some(check) = &o.check {
             command.arg("--mempalace-check").arg(check);
         }

@@ -99,6 +99,28 @@ impl Graph {
     fn mutate(&mut self, operation: &str, args: &Value) -> Result<Value, Error> {
         intent::refuse_unsettled(&self.store.connection)?;
         let timestamp = self.now()?;
+        if operation == "add" {
+            let marker = write::support_marker(&self.store.connection, args)?;
+            if marker.private {
+                let tx = self.store.connection.transaction()?;
+                let preview = write::add(&tx, args, &timestamp)?;
+                tx.rollback()?;
+                if preview["created"] == true {
+                    // WAL commits across the two databases are not atomic. A new private KG
+                    // row must never outlive a lost compiler commit without its marker.
+                    // Prelabel only NEW rows: prepublishing support on an existing row could
+                    // widen its audience if the subsequent write fails.
+                    let tx = self.store.connection.transaction()?;
+                    crate::privacy::put(
+                        &tx,
+                        "triple",
+                        preview["triple_id"].as_str().ok_or("missing triple id")?,
+                        &marker,
+                    )?;
+                    tx.commit()?;
+                }
+            }
+        }
         let wal = self.wal.clone();
         let label = format!("kg_{operation}");
         let result = intent::guarded(
@@ -190,6 +212,7 @@ fn properties(value: Option<String>) -> Value {
 /// Graph-only readers never open the palace, acquire advisory locks, or flush the audit WAL.
 pub struct GraphReader {
     connection: Connection,
+    readers: Option<Vec<String>>,
 }
 impl GraphReader {
     pub fn open(kg: &Path) -> Result<Self, Error> {
@@ -217,17 +240,60 @@ impl GraphReader {
         )?;
         connection.prepare("SELECT id,name,type,properties,created_at FROM kg.entities LIMIT 0")?;
         connection.prepare("SELECT subject,predicate,object,confidence,source_closet,valid_from,valid_to FROM kg.triples LIMIT 0")?;
-        Ok(Self { connection })
+        // Privacy metadata is read-only; the KG schema is untouched.
+        let compiler = kg
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("compiler.sqlite");
+        if compiler.is_file() {
+            let encoded = compiler
+                .canonicalize()?
+                .to_string_lossy()
+                .bytes()
+                .map(|b| {
+                    if b.is_ascii_alphanumeric() || b"/-_.".contains(&b) {
+                        (b as char).to_string()
+                    } else {
+                        format!("%{b:02X}")
+                    }
+                })
+                .collect::<String>();
+            connection.execute(
+                "ATTACH DATABASE ?1 AS compiler",
+                [format!("file:{encoded}?mode=ro")],
+            )?;
+            if connection
+                .prepare("SELECT 1 FROM compiler.sqlite_master WHERE name='privacy_markers'")?
+                .exists([])?
+            {
+                connection.execute_batch("CREATE TEMP VIEW privacy_markers AS SELECT * FROM compiler.privacy_markers; CREATE TEMP VIEW privacy_retired AS SELECT * FROM compiler.privacy_retired;")?;
+            } else {
+                connection.execute_batch(crate::privacy::SCHEMA)?;
+            }
+        } else {
+            connection.execute_batch(crate::privacy::SCHEMA)?;
+        }
+        Ok(Self {
+            connection,
+            readers: None,
+        })
+    }
+    pub fn with_readers(mut self, readers: Vec<String>) -> Self {
+        self.readers = Some(readers);
+        self
     }
     pub fn call(&self, operation: &str, args: &Value) -> Result<Value, Error> {
         if !args.is_object() {
             return Err("arguments must be an object".into());
         }
+        let mut args = args.clone();
+        // Scope belongs to the reader. Call arguments cannot remove or widen it.
+        args["_readers"] = json!(self.readers);
         match operation {
-            "query" => read::query(&self.connection, args),
-            "entities" => entities::list(&self.connection, args),
-            "timeline" => read::timeline(&self.connection, args),
-            "stats" => read::stats(&self.connection),
+            "query" => read::query(&self.connection, &args),
+            "entities" => entities::list(&self.connection, &args),
+            "timeline" => read::timeline(&self.connection, &args),
+            "stats" => read::scoped_stats(&self.connection, self.readers.as_deref()),
             _ => Err("unknown graph read operation".into()),
         }
     }
@@ -235,32 +301,30 @@ impl GraphReader {
 
 impl GraphStore for GraphReader {
     type Error = Error;
-
     fn query_entity(
         &self,
         name: &str,
         direction: palace_core::triple::Direction,
         as_of: Option<&str>,
     ) -> Result<Vec<palace_core::triple::Triple>, Error> {
-        let value = read::query(
-            &self.connection,
+        let value = self.call(
+            "query",
             &json!({"entity":name,"direction":direction.as_str(),"as_of":as_of}),
         )?;
         Ok(serde_json::from_value(value["facts"].clone())?)
     }
     fn list_entities(&self) -> Result<Vec<palace_core::entity::Entity>, Error> {
-        Ok(serde_json::from_value(entities::list(
-            &self.connection,
-            &json!({}),
-        )?)?)
+        Ok(serde_json::from_value(self.call("entities", &json!({}))?)?)
     }
     fn entity(&self, name: &str) -> Result<Option<palace_core::entity::Entity>, Error> {
-        entities::get(&self.connection, name)?
-            .map(serde_json::from_value)
+        let value = self.call("entities", &json!({"names":[name]}))?;
+        value
+            .as_array()
+            .and_then(|rows| rows.first())
+            .map(|v| serde_json::from_value(v.clone()))
             .transpose()
             .map_err(Into::into)
     }
-
     fn add_triple(&mut self, _: &Value) -> Result<Value, Error> {
         Err("read-only graph".into())
     }
@@ -278,10 +342,10 @@ impl palace_core::traits::GraphHistory for Graph {
 
 impl palace_core::traits::GraphHistory for GraphReader {
     fn stats(&self) -> Result<Value, Error> {
-        read::stats(&self.connection)
+        self.call("stats", &json!({}))
     }
     fn timeline(&self, entity: Option<&str>) -> Result<Vec<palace_core::triple::Triple>, Error> {
-        let value = read::timeline(&self.connection, &json!({"entity":entity}))?;
+        let value = self.call("timeline", &json!({"entity":entity}))?;
         Ok(serde_json::from_value(value["timeline"].clone())?)
     }
 }

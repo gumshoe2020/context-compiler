@@ -137,8 +137,9 @@ pub fn json_of(answer: &str) -> Option<Value> {
 
 /// Parse and check one answer against the copy lines the model was given. A claim or relation
 /// line outside them is a problem; a quote found on another of those lines moves the claim's
-/// line there (the locator must name a line that holds the quote, spec test 14a).
-pub fn check(answer: &str, lines: &[CopyLine]) -> Checked {
+/// line there (the locator must name a line that holds the quote, spec test 14a). `audience` holds
+/// the approved audience-* tags (the people map's); an entry may carry at most one of them.
+pub fn check(answer: &str, lines: &[CopyLine], audience: &[String]) -> Checked {
     let mut checked = Checked::default();
     let Some(value) = json_of(answer) else {
         checked
@@ -148,7 +149,7 @@ pub fn check(answer: &str, lines: &[CopyLine]) -> Checked {
     };
     let by_line: BTreeMap<usize, &str> = lines.iter().map(|l| (l.line, l.text.as_str())).collect();
     for (i, e) in items(&value, "entries").iter().enumerate() {
-        match entry(e) {
+        match entry(e, audience) {
             Ok(entry) => checked.reply.entries.push(entry),
             Err(why) => checked.problems.push(format!("entry {i}: {why}")),
         }
@@ -194,19 +195,25 @@ fn text(value: &Value, key: &str) -> Result<String, String> {
         _ => Err(format!("{key} missing or empty")),
     }
 }
-fn entry(value: &Value) -> Result<DistilledEntry, String> {
-    let tags = value["tags"]
+fn entry(value: &Value, audience: &[String]) -> Result<DistilledEntry, String> {
+    let tags: Vec<String> = value["tags"]
         .as_array()
         .ok_or("tags missing (a list)")?
         .iter()
         .filter_map(Value::as_str)
         .map(|t| t.trim().to_lowercase())
-        .filter(|t| !t.is_empty() && !t.contains([',', '.', '\n']))
         .collect();
+    let audiences: Vec<_> = tags.iter().filter(|t| t.starts_with("audience-")).collect();
+    if audiences.len() > 1 || audiences.iter().any(|t| !audience.contains(t)) {
+        return Err("use at most one approved audience-* tag per entry".into());
+    }
     Ok(DistilledEntry {
         title: text(value, "title")?,
         body: text(value, "body")?,
-        tags,
+        tags: tags
+            .into_iter()
+            .filter(|t| !t.is_empty() && !t.contains([',', '.', '\n']))
+            .collect(),
     })
 }
 fn line_of(value: &Value, by_line: &BTreeMap<usize, &str>) -> Result<usize, String> {
@@ -248,9 +255,13 @@ fn claim(value: &Value, by_line: &BTreeMap<usize, &str>) -> Result<DistilledClai
         demoted: None,
     })
 }
+/// Whether the cited line holds this nonempty quote verbatim.
+pub fn verbatim_at(quote: &str, line: usize, by_line: &BTreeMap<usize, &str>) -> bool {
+    !quote.is_empty() && by_line.get(&line).is_some_and(|t| t.contains(quote))
+}
 /// The line holding `quote` verbatim: the given line first, else the first that does.
 fn locate(quote: &str, line: usize, by_line: &BTreeMap<usize, &str>) -> Option<usize> {
-    if by_line.get(&line).is_some_and(|t| t.contains(quote)) {
+    if verbatim_at(quote, line, by_line) {
         return Some(line);
     }
     by_line
@@ -401,7 +412,7 @@ mod tests {
         let answer = r#"Here: {"entries":[{"title":"Breakfast swap","body":"Ravi and Theo swap.","tags":["Breakfast"]}],
             "claims":[{"kind":"specific","subject":"Ravi","predicate":"swaps with","object":"Theo on the 24th","date":"2026-10-06","quote":"Ravi swaps with Theo on the 24th","line":5}],
             "relations":[{"subject":"Ravi","predicate":"swaps_with","object":"Theo","confidence":0.9,"line":4}]}"#;
-        let checked = check(answer, &copy());
+        let checked = check(answer, &copy(), &[]);
         assert!(checked.passed(), "{:?}", checked.problems);
         assert_eq!(checked.reply.claims[0].line, 4);
         assert_eq!(checked.reply.entries[0].tags, ["breakfast"]);
@@ -443,22 +454,34 @@ mod tests {
         );
     }
     #[test]
+    fn audience_tags_are_the_approved_ones_at_most_one() {
+        let approved: Vec<String> = ["audience-orin", "audience-torin"].map(String::from).into();
+        let answer =
+            |tags: &str| format!(r#"{{"entries":[{{"title":"T","body":"B","tags":{tags}}}]}}"#);
+        let passes = |tags: &str| check(&answer(tags), &copy(), &approved).passed();
+        assert!(passes(r#"["a","Audience-Orin"]"#));
+        assert!(passes(r#"["a"]"#));
+        assert!(!passes(r#"["audience-orin","audience-torin"]"#));
+        assert!(!passes(r#"["audience-nella"]"#));
+        assert!(!check(&answer(r#"["audience-orin"]"#), &copy(), &[]).passed());
+    }
+    #[test]
     fn shape_problems_and_unquoted_specifics() {
         let answer = r#"{"entries":[{"title":"","body":"b","tags":[]}],
             "claims":[{"kind":"specific","subject":"Ravi","predicate":"swaps","object":"x","date":"2026-10-06","quote":"not there","line":4},
                       {"kind":"fact","subject":"a","predicate":"b","object":"c","date":"2026-10-06","line":4},
                       {"kind":"concept","subject":"a","predicate":"b","object":"c","date":"2026-10-06","line":9}]}"#;
-        let mut checked = check(answer, &copy());
+        let mut checked = check(answer, &copy(), &[]);
         assert_eq!(checked.problems.len(), 4, "{:?}", checked.problems);
         assert_eq!(checked.unquoted_specifics, [0]);
         demote_unquoted(&mut checked);
         assert_eq!(checked.reply.claims[0].kind, "concept");
         assert!(checked.reply.claims[0].demoted.is_some());
-        assert!(!check("no json", &copy()).passed());
+        assert!(!check("no json", &copy(), &[]).passed());
         let skips = r#"{"entries":[],"claims":[],"relations":[],"skipped":[
             {"line":4,"value":"24th","reason":"trivia"},{"line":5,"value":"Theo","reason":"boring"},
             {"line":9,"value":"x","reason":"chatter"}]}"#;
-        let mut checked = check(skips, &copy());
+        let mut checked = check(skips, &copy(), &[]);
         assert!(!checked.passed());
         assert_eq!(checked.reply.skipped.len(), 1);
         assert_eq!(checked.bad_skips.len(), 2, "{:?}", checked.bad_skips);
@@ -466,6 +489,6 @@ mod tests {
         assert_eq!(drop_bad_skips(&mut checked).len(), 2);
         assert!(checked.passed());
         assert_eq!(from_json(&to_json(&checked.reply)), checked.reply);
-        assert!(check(r#"{"entries":[],"claims":[],"relations":[]}"#, &copy()).passed());
+        assert!(check(r#"{"entries":[],"claims":[],"relations":[]}"#, &copy(), &[]).passed());
     }
 }

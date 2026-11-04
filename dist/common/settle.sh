@@ -42,6 +42,10 @@
 # the default used): SETTLE_DEBOUNCE_SECONDS=60, DISTILL_MIN_TURNS=3 (palace distill --min-turns),
 # SETTLE_COMPRESS_ENTRIES=40, SETTLE_COMPRESS_MAX_DAYS=3, FIDELITY_SAMPLE=10, FIDELITY_FLOOR=0.7,
 # DISTILL_LLM (palace distill --llm; unset: the rollup model, --llm),
+# SETTLE_ITEMS=0 (opt-in open-items updates after successful distill, nonfatal),
+# ITEMS_PERSON_MAP (optional TSV wing<TAB>person for non-default wings; the default uses PERSON),
+# ITEMS_TRANSCRIPT_MAP (optional TSV path-substring<TAB>person; default wing only, first match),
+# ITEMS_TRANSCRIPT_MATCH (optional: items only for transcripts whose path contains it),
 # DISTILL_RECALL_MIN_WORDS=8 (palace fidelity --distill --min-words: SETTLE-1c §1),
 # DISTILL_RECALL_FOLLOWING=6 (palace fidelity --distill --following: SETTLE-1c §2),
 # DISTILL_SPECIFIC_SAMPLE=20 (palace fidelity --distill --specific-sample: SETTLE-1d §2),
@@ -66,6 +70,7 @@ PENDING="$STATE/distill.pending"
 MINE_LOG="$CC_HOME/logs/settle-mine.log"
 DISTILL_LOG="$CC_HOME/logs/settle-distill.log"
 FIDELITY_LOG="$CC_HOME/logs/settle-fidelity.log"
+ITEMS_LOG="$CC_HOME/logs/settle-items.log"
 DAILY=0 LLM=""
 
 say() { printf 'settle: %s\n' "$*" >&2; }
@@ -263,11 +268,18 @@ distill() {
     fi
     from=$(position "$path")
     [ "$(lines_of "$path")" -gt "$from" ] || continue # no new text: no palace command
-    out=$(distill_one "$source" "$path")
+    if out=$(distill_one "$source" "$path"); then distill_code=0; else distill_code=$?; fi
+    printf '%s\n' "$out" | sed -n '/^PRIVACY QUARANTINE /p'
+    printf '%s\n' "$out" | sed -n 's/^DISTILL .* relation_skipped_no_evidence=\([0-9][0-9]*\) .*/SETTLE relation_skipped_no_evidence=\1/p'
     to=$(printf '%s\n' "$out" | sed -n 's/^DISTILL .* position=\([0-9][0-9]*\)$/\1/p' | tail -1)
     if [ -n "$to" ]; then
       say "distill $(printf '%s\n' "$out" | sed -n 's/^DISTILL \([a-z-]*\).*/\1/p' | tail -1): $source $path"
       fidelity --distill "$path"
+      if [ "${SETTLE_ITEMS:-0}" = 1 ] && [ "$distill_code" = 0 ] && [ "$to" -gt "$from" ]; then
+        items_wing=$(printf '%s\n' "$out" | sed -n 's/^DISTILL .*wing=\([^ ]*\).*/\1/p' | tail -1)
+        items_one "$path" "$((from + 1))" "$to" "$items_wing" >>"$ITEMS_LOG" 2>&1 ||
+          say "items update failed: $source $path (log: $ITEMS_LOG); the run goes on"
+      fi
     else
       say "distill failed: $source $path (kept at line $from; log: $DISTILL_LOG)"
       to=$from
@@ -292,6 +304,47 @@ distill_one() {
     2>>"$DISTILL_LOG"
 }
 
+# items_one <transcript> <from inclusive> <to inclusive> <distill wing>.
+# Use distill's resolved wing; never mix a private wing into the default person's ledger.
+# A wing is not necessarily a person's name, so other wings require an explicit mapping.
+items_one() (
+  items_person=""
+  # A wing can hold several people's conversations (e.g. a shared default wing), so a pilot can
+  # restrict items to transcripts whose path contains ITEMS_TRANSCRIPT_MATCH.
+  if [ -n "${ITEMS_TRANSCRIPT_MAP:-}" ]; then
+    if [ -n "${ITEMS_TRANSCRIPT_MATCH:-}" ]; then
+      say "warning: ITEMS_TRANSCRIPT_MAP overrides ITEMS_TRANSCRIPT_MATCH"
+    fi
+  elif [ -n "${ITEMS_TRANSCRIPT_MATCH:-}" ]; then
+    case "$1" in
+      *"$ITEMS_TRANSCRIPT_MATCH"*) ;;
+      *) say "items skipped: transcript not in ITEMS_TRANSCRIPT_MATCH: $1"; return 0 ;;
+    esac
+  fi
+  if [ "$4" = "$WING" ]; then
+    if [ -n "${ITEMS_TRANSCRIPT_MAP:-}" ]; then
+      items_person=$(awk -F '\t' -v path="$1" 'NF == 2 && length($1) && length($2) && index(path,$1) { print $2; exit }' "$ITEMS_TRANSCRIPT_MAP") || return 1
+      if [ -z "$items_person" ]; then
+        say "items skipped: transcript not in ITEMS_TRANSCRIPT_MAP: $1"
+        return 0
+      fi
+    else
+      items_person=$PERSON
+    fi
+  elif [ -n "${ITEMS_PERSON_MAP:-}" ]; then
+    items_person=$(awk -F '\t' -v w="$4" '$1 == w { p = $2 } END { print p }' "$ITEMS_PERSON_MAP") || return 1
+  fi
+  if [ -z "$items_person" ]; then
+    say "items skipped: no person mapping for wing $4"
+    return 0
+  fi
+  # shellcheck disable=SC2030 # items_one is a subshell on purpose: palace() reads this per-item PERSON, the caller's stays
+  PERSON=$items_person
+  palace --roots="$(dirname "$1")" items update --store "$PALACE_DIR/compiler.sqlite" \
+    --transcript "$1" --from-line "$2" --to-line "$3" --llm "$DISTILL_MODEL" \
+    --prompts "$CC_HOME/prompts"
+)
+
 # linked_roots: a --roots word for the real location of each symlink at the top of $CC_HOME or in
 # its scripts/ (an install may link its palace, diary root or scripts in from elsewhere, and
 # palace checks every input against --roots after resolving links).
@@ -308,7 +361,9 @@ linked_roots() {
 # palace [--roots=<dir>…] <command> <args…>: the install's palace, its names, the pinned MemPalace.
 palace() {
   mkdir -p "$CC_HOME/logs" 2>/dev/null || true
+  if [ -r "$CC_HOME/people.json" ]; then set -- --people-map "$CC_HOME/people.json" "$@"; fi
   # shellcheck disable=SC2046 # linked_roots prints whole --roots= words, one per link
+  # shellcheck disable=SC2031 # items_one sets PERSON in its subshell and calls this function there
   MEMPALACE_PALACE_PATH="$PALACE_DIR" PATH="$MEMPALACE_BIN_DIR:$PATH" \
     perl -e 'alarm 1800; exec @ARGV; exit 127' "$CC_HOME/bin/palace" --roots="$CC_HOME" $(linked_roots) "$@" \
     --mempalace-check "$CC_HOME/scripts/mempalace-check.sh" \

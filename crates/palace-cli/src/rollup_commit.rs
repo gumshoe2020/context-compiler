@@ -35,6 +35,7 @@ pub struct Inputs<'a> {
     pub connection: &'a crate::MemPalaceOptions,
     /// `palace rollup --wing`: where the mine files the rollup.
     pub wing: &'a str,
+    pub audience: &'a palace_store::privacy::Audience,
     pub thread: String,
     pub as_of: &'a str,
     pub judge: Option<&'a dyn Judge<Error = Error>>,
@@ -158,12 +159,15 @@ fn finish(
     }
     let relations = propose_step(&mut steps)?;
     let status = watch_and_store(&mut steps)?;
+    crate::fidelity_cmd::record_rollup(inputs, &written.file())?;
     let resumed = match verb {
         "resumed" => format!(" steps={}", steps.summary()),
         _ => String::new(),
     };
     let (path, claims) = (written.path.display(), written.claims().len());
-    println!("ROLLUP {verb} {path}{resumed} claims={claims} relations={relations} watch={status}");
+    privacy_print!(
+        "ROLLUP {verb} {path}{resumed} claims={claims} relations={relations} watch={status}"
+    );
     Ok(0)
 }
 /// The step log of one rollup file: what earlier runs finished, and what this run did.
@@ -200,12 +204,23 @@ fn mine(inputs: &Inputs) -> Result<(), Error> {
 /// `<created>+<cited>`, gating the relations unless an earlier run finished `propose`.
 fn propose_step(steps: &mut Steps) -> Result<String, Error> {
     if let Some(event) = steps.done.get("propose") {
-        return Ok(format!("{}+{}", event["created"], event["cited"]));
+        return Ok(format!(
+            "{}+{} relation_skipped_no_evidence={}",
+            event["created"],
+            event["cited"],
+            event["relation_skipped_no_evidence"].as_u64().unwrap_or(0)
+        ));
     }
     let logged = relation_steps(steps.inputs, &steps.written.file())?;
     let r = propose(steps.inputs, steps.written, &logged)?;
-    steps.record("propose", json!({"created":r.created,"cited":r.cited}))?;
-    Ok(format!("{}+{}", r.created, r.cited))
+    steps.record(
+        "propose",
+        json!({"created":r.created,"cited":r.cited,"relation_skipped_no_evidence":r.skipped}),
+    )?;
+    Ok(format!(
+        "{}+{} relation_skipped_no_evidence={}",
+        r.created, r.cited, r.skipped
+    ))
 }
 /// Watch the rollup (read-only) and append its claims + findings to the claim store; the watch
 /// status (logged, or recomputed when only `store` is missing).
@@ -231,12 +246,29 @@ fn write_entry(inputs: &Inputs, body: &str) -> Result<Written, Error> {
     let at = crate::rollup::now_millis()?;
     let file = diary_file::render(at, &title, &text); // render trims, as the plugin does
     let path = crate::paths::database(&inputs.root.join("diary").join(&file.name))?;
+    let mut store = ClaimStore::open(&compiler_path(inputs.kg)?)?;
+    let mut markers = Vec::new();
+    for name in inputs.diary.names()? {
+        let ms = store.privacy_markers("entry", &name)?;
+        if ms.is_empty() {
+            markers.push(store.privacy_source(&name)?);
+        } else {
+            markers.extend(ms);
+        }
+    }
+    let mut marker = inputs.audience.marker(&file.name);
+    marker.people = markers.into_iter().flat_map(|m| m.people).collect();
+    let marker = palace_store::privacy::tagged_entry(&marker, &file.content);
+    if !inputs.audience.matches(&marker) {
+        return Err("rollup output tags disagree with the requested audience".into());
+    }
+    store.mark_entry(&file.name, &marker)?;
     fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&path)?
         .write_all(file.content.as_bytes())?;
-    let mut store = ClaimStore::open(&compiler_path(inputs.kg)?)?;
+
     let text_sha256 = palace_core::ids::sha256(file.text.as_bytes()); // the text written (L-2)
     store.log(&json!({"operation":"rollup_commit","file":file.name,"iso":diary_file::iso_millis(at),"title":file.title,"text_sha256":text_sha256,"thread":inputs.thread,"as_of":inputs.as_of}))?;
     Ok(Written {
@@ -270,12 +302,14 @@ fn log_step(inputs: &Inputs, written: &Written, step: &str, extra: Value) -> Res
 struct Relations {
     created: usize,
     cited: usize,
+    skipped: usize,
     citations: Vec<(String, String)>,
 }
 impl Relations {
     /// Counts one `propose_relation` step (logged now or by an interrupted run).
     fn add(&mut self, step: &Value) {
         match step["outcome"].as_str() {
+            Some("relation_skipped_no_evidence") => self.skipped += 1,
             Some("created") => self.created += 1,
             Some("cited") => {
                 if let (Some(triple), Some(claim)) =
@@ -299,10 +333,13 @@ fn propose(
     written: &Written,
     logged: &BTreeMap<usize, Value>,
 ) -> Result<Relations, Error> {
-    let evidence = inputs
+    let mut evidence = inputs
         .connection
         .evidence(inputs.palace, &inputs.root.join("diary"))
         .map_err(|e| Unavailable::error(format!("after mine: {e}")))?;
+    let compiler = compiler_path(inputs.kg)?;
+    evidence.diary = Diary::open(&inputs.root.join("diary"))?;
+    crate::privacy::filter_audience_diary(&mut evidence.diary, &compiler, inputs.audience)?;
     let disputed = disputed_claims(inputs.kg)?;
     let mut graph = crate::graph::open(&crate::graph::GraphPaths {
         palace: Some(inputs.palace.to_owned()),
@@ -360,7 +397,7 @@ fn skip_disputed(
 ) -> Result<Value, Error> {
     let step = json!({"operation":"rollup_step","file":written.file(),"step":"propose_relation",
         "index":index,"outcome":"disputed","claim_id":relation.claim_id});
-    eprintln!("rollup: relation {index} not proposed: claim disputed");
+    privacy_log!("rollup: relation {index} not proposed: claim disputed");
     graph.log(&step)?;
     Ok(step)
 }
@@ -369,21 +406,29 @@ fn skip_disputed(
 fn gate_one(
     evidence: &palace_mempalace::Evidence,
     graph: &mut palace_store::graph::Graph,
-    (index, relation): (usize, Proposal),
+    (index, mut relation): (usize, Proposal),
     written: &Written,
 ) -> Result<Value, Error> {
     let now = graph.now()?;
+    relation.transcript = Some(written.file());
     let result = propose_relation(evidence, graph, &relation, &now, "palace-rs")
         .map_err(|e| crate::rollup::transport_or(evidence, e))?;
     if let Some(reason) = evidence.searcher.unavailable() {
         return Err(Unavailable::error(format!("during commit: {reason}")));
     }
-    eprintln!("rollup: relation {result}");
+    privacy_log!(
+        "rollup: relation triple_id={}",
+        result["value"]["triple_id"]
+    );
     let outcome = match (result["ok"] == true, result["value"]["created"] == true) {
+        (false, _) if palace_core::write_gate::skipped_no_evidence(&result) => {
+            "relation_skipped_no_evidence"
+        }
         (false, _) => "rejected",
         (true, true) => "created",
         (true, false) => "cited",
     };
+    eprintln!("rollup: relation {index} {outcome}");
     let step = json!({"operation":"rollup_step","file":written.file(),"step":"propose_relation",
         "index":index,"outcome":outcome,"triple_id":result["value"]["triple_id"],"claim_id":relation.claim_id});
     graph.log(&step)?;
@@ -427,10 +472,12 @@ mod tests {
             json!({"outcome":"created","triple_id":"t_new","claim_id":"c_1"}),
             json!({"outcome":"cited","triple_id":"t_old","claim_id":"c_12"}),
             json!({"outcome":"rejected","triple_id":null,"claim_id":"c_3"}),
+            json!({"outcome":"relation_skipped_no_evidence","triple_id":null,"claim_id":"c_4"}),
         ] {
             r.add(&step);
         }
         assert_eq!((r.created, r.cited), (1, 1));
+        assert_eq!(r.skipped, 1);
         assert_eq!(r.citations, [("t_old".to_owned(), "c_12".to_owned())]);
     }
     #[test]

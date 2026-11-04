@@ -14,6 +14,20 @@ struct Fake {
 }
 impl EvidenceSearch for Fake {
     type Error = String;
+    fn evidence_entries(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<crate::traits::EvidenceEntry>, String> {
+        Ok(self
+            .search_headers(query, limit)?
+            .into_iter()
+            .map(|text| crate::traits::EvidenceEntry {
+                source: query.into(),
+                text,
+            })
+            .collect())
+    }
     fn search_headers(&self, _: &str, limit: usize) -> Result<Vec<String>, String> {
         if limit != 3 {
             return Err("wrong evidence limit".into());
@@ -58,6 +72,7 @@ fn base() -> Proposal {
         claim: None,
         claim_id: None,
         transcript: None,
+        evidence_names: None,
     }
 }
 fn run(p: &Proposal, headers: &[&str], graph: &mut Fake) -> Result<Value, String> {
@@ -82,13 +97,13 @@ fn check(ok: bool) -> Result<(), String> {
 pub fn write_resolves() -> Result<(), String> {
     let mut g = Fake::default();
     let p = base();
-    let result = run(&p, &["# Primary"], &mut g)?;
+    let result = run(&p, &["# Primary\na supports b."], &mut g)?;
     check(result == json!({"ok":true,"value":{"ok":true}}) && g.writes.len() == 1)?;
     let provenance: Value = serde_json::from_str(g.writes[0]["source_closet"].as_str().unwrap())
         .map_err(|e| e.to_string())?;
     check(
         provenance
-            == json!({"confidence":0.82,"supplied_by":"callum","evidence_refs":["direct source"],"assessed_at":"2026-09-24T12:00:00Z","written_via":"palace-rs"})
+            == json!({"confidence":0.82,"supplied_by":"callum","evidence_refs":["direct source"],"assessed_at":"2026-09-24T12:00:00Z","written_via":"palace-rs","evidence_entry":"direct source"})
             && g.writes[0].get("from_type").is_none(),
     )
 }
@@ -97,7 +112,7 @@ pub fn write_empty() -> Result<(), String> {
     let mut p = base();
     p.evidence.clear();
     check(
-        run(&p, &["primary"], &mut g)?
+        run(&p, &["primary a b"], &mut g)?
             == json!({"ok":false,"reason":"direct first-order evidence is required"})
             && g.writes.is_empty(),
     )
@@ -122,7 +137,7 @@ pub fn write_types() -> Result<(), String> {
             p.from_type = Some(value.into());
         }
         check(
-            run(&p, &["primary"], &mut g)?["reason"]
+            run(&p, &["primary a b"], &mut g)?["reason"]
                 == format!(
                     "{field} \"{value}\" is not one of person, project, decision, fact, document, system, thread, event"
                 ),
@@ -132,7 +147,7 @@ pub fn write_types() -> Result<(), String> {
     p.from_type = Some("person".into());
     p.to_type = Some("project".into());
     check(
-        run(&p, &["primary"], &mut g)?["ok"] == true
+        run(&p, &["primary a b"], &mut g)?["ok"] == true
             && g.writes[0]["from_type"] == "person"
             && g.writes[0]["to_type"] == "project",
     )
@@ -156,7 +171,12 @@ pub fn evidence_mixed() -> Result<(), String> {
             && g.writes.is_empty(),
     )?;
     check(
-        run(&p, &["# KG precision audit", "# Primary"], &mut g)?["ok"] == true
+        run(
+            &p,
+            &["# KG precision audit", "# Primary\na supports b."],
+            &mut g,
+        )?["ok"]
+            == true
             && g.writes.len() == 1,
     )
 }
@@ -173,7 +193,7 @@ pub fn batch_independent() -> Result<(), String> {
     let mut g = Fake::default();
     let mut oks = Vec::new();
     for p in proposals {
-        oks.push(run(&p, &["primary"], &mut g)?["ok"].clone());
+        oks.push(run(&p, &["primary a b"], &mut g)?["ok"].clone());
     }
     check(
         oks == vec![json!(true), json!(false), json!(true)]
@@ -225,7 +245,7 @@ mod tests {
         p.confidence = f64::NAN;
         p.supplied_by.clear();
         assert_eq!(
-            super::run(&p, &["primary"], &mut g).unwrap()["reason"],
+            super::run(&p, &["primary a b"], &mut g).unwrap()["reason"],
             "confidence must be a finite number"
         );
         p.evidence[0].query = " ".into();
@@ -243,6 +263,13 @@ mod failure_tests {
     struct Broken;
     impl EvidenceSearch for Broken {
         type Error = String;
+        fn evidence_entries(
+            &self,
+            _: &str,
+            _: usize,
+        ) -> Result<Vec<crate::traits::EvidenceEntry>, String> {
+            Err("vector_disabled".into())
+        }
         fn search_headers(&self, _: &str, _: usize) -> Result<Vec<String>, String> {
             Err("vector_disabled".into())
         }
@@ -259,7 +286,10 @@ mod failure_tests {
                 .contains("vector_disabled")
         );
         assert!(graph.writes.is_empty());
-        assert_eq!(run(&base(), &["primary"], &mut graph).unwrap()["ok"], true);
+        assert_eq!(
+            run(&base(), &["primary a b"], &mut graph).unwrap()["ok"],
+            true
+        );
         assert_eq!(graph.writes.len(), 1);
     }
 }
@@ -270,7 +300,7 @@ mod dry_run_tests {
     #[test]
     fn dry_run_writes_nothing_and_claims_reach_provenance() {
         let search = Fake {
-            headers: vec!["# Entry\nTags: callum.".into()],
+            headers: vec!["# Entry\nTags: callum.\na supports b.".into()],
             ..Default::default()
         };
         let mut p = base();
@@ -284,7 +314,7 @@ mod dry_run_tests {
         p.claim = Some("C7".into());
         p.claim_id = Some("c_0123456789ab".into());
         let mut graph = Fake::default();
-        run(&p, &["# Entry\nTags: callum."], &mut graph).unwrap();
+        run(&p, &["# Entry\nTags: callum.\na supports b."], &mut graph).unwrap();
         let provenance: Value =
             serde_json::from_str(graph.writes[0]["source_closet"].as_str().unwrap()).unwrap();
         assert_eq!(provenance["claim"], "C7");

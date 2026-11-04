@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 palace-core.workspace = true
 rusqlite.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 
 [features]

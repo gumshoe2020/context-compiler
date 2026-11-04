@@ -49,6 +49,13 @@ fn escalated(o: &Options) -> Result<String, Error> {
     if !store.record_ask(&ask, &at)? {
         return Err(Refused::error(format!("{token} was asked already")));
     }
+    if store
+        .privacy_markers("ask", ask.finding)?
+        .iter()
+        .all(|m| m.private)
+    {
+        return Ok(format!("HELD {}", ask.finding));
+    }
     Ok(format!("ESCALATED {token} {line}"))
 }
 

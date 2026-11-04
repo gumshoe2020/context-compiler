@@ -219,7 +219,9 @@ pub const SKIP_FLAG: f64 = 0.5;
 /// and the 30-day concept figure over every concept row (`month`). The specifics pool only
 /// `rule:values-anywhere` rows; a week with none pools its `rule:values` rows as before, without
 /// the "as specifics" part (the two, and older per-sentence rows, are never pooled together).
-/// Rows carry `point`, `type`, `judge`, `sampled`, `supported`, `unjudged` and `items`.
+/// The F line pools every fidelity row, private ones included, as counts only.
+/// Rows carry `point`, `type`, `judge`, `sampled`, `supported`, `unjudged` and only the
+/// numeric `items` counters (including `values_kept_in`); no sampled text is needed.
 pub fn digest_line(window: &[Value], week: &[Value], month: &[Value]) -> Option<String> {
     if window.is_empty() {
         return None;

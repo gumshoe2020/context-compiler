@@ -3,6 +3,7 @@
 //! `--max` lines: one per correction by the assistant (`… — undo e_…`; reply `undo e_…` to undo it),
 //! one summary line for rule and judge events, one line `queue=… asks=… unsent=…`. No output (exit 0)
 //! when the window holds nothing, so the wrapper sends no empty message. Never canaries or terms.
+//! The F line pools every fidelity row, private ones included, as counts only.
 //! Read-only; prints, never sends. Exit 0 printed, 1 refused, 2 broken.
 use crate::findings::QUEUE_KINDS;
 use crate::improve::Options;
@@ -44,9 +45,9 @@ fn lines(o: &Options) -> Result<Vec<String>, Error> {
     // SETTLE-1b (spec §8): one recall line when the window holds fidelity checks, pooled over
     // the last 7 days (SETTLE-1d §4).
     let (window, week, month) = (
-        store.fidelity_rows(Some(&since))?,
-        store.fidelity_rows(Some(&store.days_ago(7)?))?,
-        store.fidelity_rows(None)?,
+        store.fidelity_counts(Some(&since))?,
+        store.fidelity_counts(Some(&store.days_ago(7)?))?,
+        store.fidelity_counts(None)?,
     );
     lines.extend(palace_core::recall::digest_line(&window, &week, &month));
     Ok(lines)
@@ -59,6 +60,7 @@ fn skip_lines(store: &ClaimStore, since: &str) -> Result<Vec<String>, Error> {
     Ok(skips
         .iter()
         .filter(in_window)
+        .filter(|e| e["private"] != true)
         .map(|e| {
             format!(
                 "rollup skipped: thread={} cluster={} over the cap of {}",
@@ -86,7 +88,7 @@ fn queued(store: &ClaimStore) -> Result<usize, Error> {
         open: true,
         ..Default::default()
     };
-    let findings = store.findings(&open)?;
+    let findings = store.public_findings(&open)?;
     Ok(findings
         .iter()
         .filter(|f| QUEUE_KINDS.contains(&f["kind"].as_str().unwrap_or_default()))

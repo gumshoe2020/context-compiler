@@ -1,0 +1,58 @@
+{
+  "id": "mempalace-memory",
+  "name": "MemPalace Memory",
+  "description": "Marker-aware MemPalace memory search",
+  "kind": "memory",
+  "categories": [
+    "other"
+  ],
+  "contracts": {
+    "tools": [
+      "memory_search",
+      "mempalace_search",
+      "memory_get",
+      "mempalace_diary_write",
+      "mempalace_status"
+    ]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "palaceBin": {
+        "type": "string"
+      },
+      "palacePath": {
+        "type": "string"
+      },
+      "storePath": {
+        "type": "string"
+      },
+      "peopleMap": {
+        "type": "string"
+      },
+      "mempalaceMcp": {
+        "type": "string"
+      },
+      "wing": {
+        "type": "string"
+      },
+      "agentName": {
+        "type": "string"
+      },
+      "diaryDir": {
+        "type": "string"
+      },
+      "diaryRoot": {
+        "type": "string"
+      },
+      "mempalace": {
+        "type": "string"
+      }
+    }
+  },
+  "version": "0.3.0"
+}

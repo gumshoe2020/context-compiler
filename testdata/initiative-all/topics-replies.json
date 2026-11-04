@@ -1,0 +1,7 @@
+{
+  "1-1":{"actions":[{"action":"create","id":"dice-thread","kind":"topic","owner":"person","title":"Dice and the universe","line":1,"quote":"We can debate whether dice explain the universe later."}]},
+  "2-2":{"actions":[{"action":"update","id":"dice-thread","line":2,"quote":"Keep that dice debate for another evening."}]},
+  "3-3":{"actions":[{"action":"close","id":"dice-thread","status":"done","line":3,"close_quote":"Back to dice: I think randomness is fundamental."}]},
+  "4-4":{"actions":[{"action":"create","id":"book-thread","kind":"topic","owner":"person","title":"The Glass Harbor reread","line":4,"quote":"I am rereading The Glass Harbor; ask me about it later."}]},
+  "5-5":{"actions":[{"action":"expire","id":"book-thread","line":5,"close_quote":"Let us talk about the chart instead today."}]}
+}

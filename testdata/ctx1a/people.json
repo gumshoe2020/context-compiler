@@ -1,0 +1,13 @@
+{
+  "people": {
+    "orin": {"handles": ["signal:+12025550100"], "owner": true},
+    "wren": {"handles": ["signal:+12025550101"], "private": true}
+  },
+  "private_wings": {"willow": ["wren"]},
+  "conversations": [
+    {"match": "oc-tern-19a1", "people": ["orin"]},
+    {"match": "oc-quince-4e5f", "people": ["orin"]},
+    {"match": "oc-mossgate-2c3d", "people": ["orin"]},
+    {"match": "oc-willow-9a8b", "people": ["wren"], "private": true}
+  ]
+}

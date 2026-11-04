@@ -1,9 +1,7 @@
 #![forbid(unsafe_code)]
-mod child;
-mod diary_tool;
+use palace_mcp::{child, diary_tool, options};
 mod json_input;
 mod kg_tools;
-mod options;
 mod reply_tool;
 mod service;
 use palace_store::Error;
@@ -18,7 +16,57 @@ fn main() {
     }
 }
 fn run() -> Result<(), Error> {
-    let options = options::Options::parse(std::env::args_os().skip(1))?;
+    // Identity is adapter configuration, deliberately absent from the model's tool schema.
+    let mut arguments = Vec::new();
+    let mut args = std::env::args_os().skip(1);
+    let (mut people, mut conversation) = (None, None);
+    while let Some(arg) = args.next() {
+        match arg.to_str() {
+            Some("--people-map") => {
+                let path = args.next().ok_or("people map required")?;
+                people = Some(palace_store::privacy::People::parse(
+                    &std::fs::read_to_string(path)?,
+                )?);
+            }
+            Some("--people-map-if-exists") => {
+                let path = std::path::PathBuf::from(args.next().ok_or("people map required")?);
+                if path.is_file() {
+                    people = Some(palace_store::privacy::People::parse(
+                        &std::fs::read_to_string(path)?,
+                    )?);
+                }
+            }
+            Some("--conversation-env") => {
+                let key = args.next().ok_or("conversation env required")?;
+                conversation = std::env::var(key).ok().filter(|s| !s.is_empty());
+            }
+            Some("--conversation") => {
+                conversation = Some(
+                    args.next()
+                        .ok_or("conversation required")?
+                        .into_string()
+                        .map_err(|_| "non UTF8 conversation")?,
+                )
+            }
+            _ => arguments.push(arg),
+        }
+    }
+    let options = options::Options::parse(arguments.into_iter())?;
+    if people.is_none()
+        && let Some(root) = options.palace.as_deref().and_then(|p| p.parent())
+    {
+        let path = root.join("people.json");
+        if path.is_file() {
+            people = Some(palace_store::privacy::People::parse(
+                &std::fs::read_to_string(path)?,
+            )?);
+        }
+    }
+    palace_store::privacy::configure(palace_store::privacy::Identity {
+        people,
+        conversation,
+        local_operator: false,
+    })?;
     let (person, assistant) = &options.names;
     palace_core::names::set(person.as_deref(), assistant.as_deref())?;
     let mut service = Service::open(options);

@@ -124,7 +124,9 @@ graph_server() {
     --diary-root "$CC_HOME/diary-root" --wing "$WING" --agent "$agent" \
     --mempalace "$MEMPALACE_BIN_DIR/mempalace" --mempalace-check "$CC_HOME/scripts/mempalace-check.sh" \
     --wings-root "$CC_HOME/wings" --person "$PERSON" --assistant "$ASSISTANT" \
-    --palace-bin "$CC_HOME/bin/palace"
+    --palace-bin "$CC_HOME/bin/palace" \
+    --people-map-if-exists "$CC_HOME/people.json" \
+    --conversation-env CONTEXT_COMPILER_CONVERSATION
 }
 
 # --- the hooks ----------------------------------------------------------------------------

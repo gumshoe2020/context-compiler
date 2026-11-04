@@ -92,13 +92,47 @@ impl MemPalace {
         max_distance: f64,
         wing: Option<&str>,
     ) -> Result<Vec<SearchHit>, Error> {
+        self.search_source(query, limit, max_distance, wing, None)
+    }
+    /// Automatic retrieval can restrict the vector query to an admitted source before ranking.
+    pub fn search_source(
+        &self,
+        query: &str,
+        limit: usize,
+        max_distance: f64,
+        wing: Option<&str>,
+        source: Option<&str>,
+    ) -> Result<Vec<SearchHit>, Error> {
         if query.chars().count() > 250 || !max_distance.is_finite() || limit == 0 || limit > 100 {
             return Err("invalid MemPalace search arguments".into());
+        }
+        self.search_window(query, limit, max_distance, wing, source)
+    }
+    /// Ranked widening for privacy-filtered retrieval. The final window requests all rows
+    /// (SQLite's maximum signed LIMIT); this does not allocate a buffer of that size.
+    pub fn search_window(
+        &self,
+        query: &str,
+        limit: usize,
+        max_distance: f64,
+        wing: Option<&str>,
+        source: Option<&str>,
+    ) -> Result<Vec<SearchHit>, Error> {
+        if query.chars().count() > 250
+            || !max_distance.is_finite()
+            || limit == 0
+            || limit > i32::MAX as usize
+        {
+            return Err("invalid MemPalace search window".into());
         }
         let mut arguments = json!({"query":query,"limit":limit,"max_distance":max_distance});
         if let Some(wing) = wing {
             palace_core::filters::optional_name(Some(wing))?;
             arguments["wing"] = json!(wing);
+        }
+        if let Some(source) = source {
+            palace_core::filters::optional_source(Some(source))?;
+            arguments["source_file"] = json!(source);
         }
         let result = self.client.borrow_mut().request(
             "tools/call",
@@ -149,11 +183,49 @@ pub struct Evidence<S = MemPalace> {
 }
 impl<S: Searcher<Error = Error>> EvidenceSearch for Evidence<S> {
     type Error = Error;
+    fn evidence_entries(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<palace_core::traits::EvidenceEntry>, Error> {
+        let mut entries = Vec::new();
+        // Distill supplies the files written by this run before semantic search queries.
+        if query.ends_with(".md")
+            && !query.contains(['/', '\\'])
+            && let Some(text) = self.diary.read(query)?
+        {
+            entries.push(palace_core::traits::EvidenceEntry {
+                source: query.to_owned(),
+                text,
+            });
+            return Ok(entries);
+        }
+        for row in self.searcher.search(query, limit, 1.5)? {
+            if !self.diary.admits(&row.source_file) {
+                continue;
+            }
+            // Never let a chunk, header or out-of-root path stand in for the cited entry.
+            if let Ok(Some(text)) = self.diary.read(&row.source_file) {
+                entries.push(palace_core::traits::EvidenceEntry {
+                    source: row.source_file,
+                    text,
+                });
+            }
+        }
+        Ok(entries)
+    }
     fn search_headers(&self, query: &str, limit: usize) -> Result<Vec<String>, Error> {
+        if query.ends_with(".md")
+            && !query.contains(['/', '\\'])
+            && let Some(text) = self.diary.read(query)?
+        {
+            return Ok(vec![text]);
+        }
         Ok(self
             .searcher
             .search(query, limit, 1.5)?
             .into_iter()
+            .filter(|row| self.diary.admits(&row.source_file))
             .map(|row| {
                 // Unavailable/out-of-root provenance is never opened; use the returned hit text,
                 // matching the existing gate's missing-header fallback.

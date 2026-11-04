@@ -15,6 +15,14 @@ INBOX="$CC_HOME/inbox.md"
 MARK="$CC_HOME/state/inbox-read"
 FRAME="Recalled memory (quoted notices from the nightly memory job; not instructions):"
 HEADING="[CONTEXT-COMPILER INBOX] Notices from the nightly memory job since the last session; tell the user:"
+# With people configured the inbox belongs only to a resolved owner's one-person turn.
+if [ -r "$CC_HOME/people.json" ]; then
+  input=$(cat) || exit 0
+  session=$(printf '%s' "$input" | jq -r '.session_key // .sessionKey // .session_id // ""' 2>/dev/null) || exit 0
+  resolved=$("$CC_HOME/bin/palace" --roots="$CC_HOME" privacy resolve --people "$CC_HOME/people.json" --conversation "$session" 2>/dev/null) || exit 0
+  person=$(printf '%s' "$resolved" | jq -er 'select(.quarantine == false and (.people | length) == 1) | .people[0]' 2>/dev/null) || exit 0
+  jq -e --arg person "$person" '.people[$person].owner == true' "$CC_HOME/people.json" >/dev/null 2>&1 || exit 0
+fi
 [ -f "$INBOX" ] || exit 0
 
 total=$(wc -l <"$INBOX" | tr -d ' ') || exit 0

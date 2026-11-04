@@ -1,0 +1,4 @@
+{"ts":"2001-01-15T12:00:00Z","role":"user","text":"I will send the chart and attend the lantern meeting."}
+{"ts":"2001-01-15T13:00:00Z","role":"assistant","text":"Use the blue chart."}
+{"ts":"2001-01-15T14:00:00Z","role":"user","text":"Okay sent."}
+{"ts":"2001-01-15T15:00:00Z","role":"user","text":"The meeting date has passed."}

@@ -17,6 +17,16 @@ pub trait GraphStore {
 pub trait EvidenceSearch {
     type Error;
     fn search_headers(&self, query: &str, limit: usize) -> Result<Vec<String>, Self::Error>;
+    /// Ranked evidence entries, with their actual source identity and full text.
+    fn evidence_entries(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<EvidenceEntry>, Self::Error>;
+}
+pub struct EvidenceEntry {
+    pub source: String,
+    pub text: String,
 }
 pub trait Judge {
     type Error;

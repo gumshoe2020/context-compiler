@@ -76,6 +76,15 @@ impl Cluster {
         self.members.len() + self.dropped.len()
     }
 }
+/// Eligibility counts the entries the writer receives, excluding budget-dropped entries.
+pub fn ineligible(cluster: &Cluster, minimum: u64) -> Option<String> {
+    let size = cluster.members.len() as u64;
+    if size == 0 {
+        return Some("cluster empty".into());
+    }
+    (size < minimum).then(|| format!("too small (minimum {minimum})"))
+}
+
 pub struct Request<'a> {
     pub thread: &'a str,
     pub tags: &'a [String],

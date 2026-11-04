@@ -146,11 +146,30 @@ pub fn next_number(c: &Connection, rollup: &str) -> Result<String, Error> {
 
 /// Findings as JSON, newest first; `open` keeps undecided ones, `claim` / `rollup` filter.
 pub fn findings(c: &Connection, filter: &FindingFilter) -> Result<Vec<Value>, Error> {
-    let mut s = c.prepare(
+    findings_scoped(c, filter, false)
+}
+pub fn public_findings(c: &Connection, filter: &FindingFilter) -> Result<Vec<Value>, Error> {
+    findings_scoped(c, filter, true)
+}
+fn findings_scoped(
+    c: &Connection,
+    filter: &FindingFilter,
+    shared: bool,
+) -> Result<Vec<Value>, Error> {
+    let admitted = if shared && crate::auto::has_table(c, "privacy_markers")? {
+        format!(
+            "{} AND {}",
+            crate::privacy::shared_only("claim", "findings.claim"),
+            crate::privacy::shared_only("entry", "findings.rollup")
+        )
+    } else {
+        "1".into()
+    };
+    let mut s = c.prepare(&format!(
         "SELECT id,claim,rollup,kind,evidence,proposal,checker,checked_at,decision,last_seen,seen_count FROM findings
-         WHERE (?1=0 OR decision IS NULL) AND (?2 IS NULL OR claim=?2) AND (?3 IS NULL OR rollup=?3)
-         ORDER BY checked_at, id",
-    )?;
+         WHERE (?1=0 OR decision IS NULL) AND (?2 IS NULL OR claim=?2) AND (?3 IS NULL OR rollup=?3) AND {admitted}
+         ORDER BY checked_at, id"
+    ))?;
     let rows = s
         .query_map(
             rusqlite::params![filter.open, filter.claim, filter.rollup],

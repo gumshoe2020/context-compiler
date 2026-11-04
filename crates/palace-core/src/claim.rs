@@ -93,14 +93,14 @@ fn parse_line(line: &str) -> Result<Claim, String> {
     if !is_claim_number(number) {
         return Err(bad("claim number must be C<n>"));
     }
-    let (superseded_by, corrected, rest) = marker(rest).map_err(&bad)?;
-    let (rest, quote) = split_quote(rest).map_err(&bad)?;
+    let (superseded_by, corrected, rest) = marker(rest).map_err(bad)?;
+    let (rest, quote) = split_quote(rest).map_err(bad)?;
     let (rest, source) = split_last_field(rest).ok_or_else(|| bad("missing source"))?;
     let (statement, date) = split_last_field(rest).ok_or_else(|| bad("missing date"))?;
-    let fields = statement_fields(statement).map_err(&bad)?;
+    let fields = statement_fields(statement).map_err(bad)?;
     let predicate = active_predicate(number, fields[1])?;
-    validate_date(date).map_err(&bad)?;
-    validate_source(source).map_err(&bad)?;
+    validate_date(date).map_err(bad)?;
+    validate_source(source).map_err(bad)?;
     check_quote(number, quote.as_deref())?;
     Ok(Claim {
         quote,

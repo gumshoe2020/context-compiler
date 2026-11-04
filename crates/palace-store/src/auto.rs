@@ -20,12 +20,21 @@ pub struct Candidate {
 /// `mode=ro`). An older store without the M4d-2b tables has no asks and no marks.
 pub fn candidates(compiler: &Path, kg: &Path) -> Result<Vec<Candidate>, Error> {
     let c = crate::inspect::open(compiler, kg)?;
+    if has_table(&c, "privacy_markers")? {
+        let admitted = crate::privacy::shared_only("claim", "findings.claim");
+        let mut held = c.prepare(&format!(
+            "SELECT id FROM findings WHERE decision IS NULL AND NOT ({admitted})"
+        ))?;
+        for id in held.query_map([], |r| r.get::<_, String>(0))? {
+            eprintln!("privacy: held finding={}", id?);
+        }
+    }
     let filter = lookup::FindingFilter {
         open: true,
         ..Default::default()
     };
     let mut out = Vec::new();
-    for finding in lookup::findings(&c, &filter)? {
+    for finding in lookup::public_findings(&c, &filter)? {
         let Some(claim_id) = finding["claim"].as_str().map(str::to_owned) else {
             continue;
         };
@@ -113,6 +122,36 @@ impl ClaimStore {
             params![ask.finding, ask.claim, ask.kind, ask.token, ask.line, at, ask.proposal],
         )? == 1;
         if added {
+            let rollup: Option<String> = tx
+                .query_row(
+                    "SELECT rollup FROM findings WHERE id=?1",
+                    [ask.finding],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let mut inputs = match rollup {
+                Some(file) => crate::privacy::markers(&tx, "entry", &file)?,
+                None => Vec::new(),
+            };
+            if inputs.is_empty() {
+                inputs = crate::privacy::markers(&tx, "claim", ask.claim)?;
+                if inputs.iter().any(|m| !m.private) {
+                    inputs.retain(|m| !m.private);
+                }
+            }
+            let own = crate::privacy::conversation_id();
+            if let Some(session) = &own {
+                inputs.push(crate::privacy::conversation(session, ""));
+            }
+            if inputs.is_empty() {
+                inputs.push(crate::privacy::origin(&tx, ask.claim)?);
+            }
+            let marker =
+                crate::privacy::Marker::meet(&inputs, own.as_deref().unwrap_or(&inputs[0].source));
+            if marker.private {
+                eprintln!("privacy: held ask={}", ask.finding);
+            }
+            crate::privacy::put(&tx, "ask", ask.finding, &marker)?;
             let line = json!({"operation":"ask","finding":ask.finding,"claim":ask.claim,"kind":ask.kind,"token":ask.token,"asked_at":at,"proposal":ask.proposal});
             write_log::append(&tx, &line.to_string())?;
         }
@@ -123,8 +162,19 @@ impl ClaimStore {
     /// Open asks (not answered, their finding undecided), oldest first. An orphan — an ask left
     /// open although its finding was decided (before M4d-2c) — is not open (review S-3).
     pub fn open_asks(&self) -> Result<Vec<Value>, Error> {
+        let admitted = format!(
+            "{} AND {}",
+            crate::privacy::shared_only("claim", "asks.claim"),
+            crate::privacy::shared_only("ask", "asks.finding")
+        );
+        let mut held = self.store.connection.prepare(&format!(
+            "SELECT finding FROM asks WHERE answered_at IS NULL AND NOT ({admitted})"
+        ))?;
+        for id in held.query_map([], |r| r.get::<_, String>(0))? {
+            eprintln!("privacy: held ask={}", id?);
+        }
         let sql = format!(
-            "SELECT {ASK_COLUMNS} FROM asks WHERE answered_at IS NULL AND NOT EXISTS (SELECT 1 FROM findings f WHERE f.id=asks.finding AND f.decision IS NOT NULL) ORDER BY asked_at, finding"
+            "SELECT {ASK_COLUMNS} FROM asks WHERE {admitted} AND answered_at IS NULL AND NOT EXISTS (SELECT 1 FROM findings f WHERE f.id=asks.finding AND f.decision IS NOT NULL) ORDER BY asked_at, finding"
         );
         let mut s = self.store.connection.prepare(&sql)?;
         let rows = s.query_map([], ask_json)?.collect::<Result<_, _>>()?;

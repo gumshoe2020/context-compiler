@@ -79,6 +79,13 @@ pub fn current(c: &Connection, change: &Value) -> Result<Value, Error> {
         Ok(c.query_row(sql, [id], |r| r.get(0)).optional()?)
     };
     Ok(match change["kind"].as_str().unwrap_or_default() {
+        "privacy_retired" => json!(
+            c.prepare(
+                "SELECT source FROM privacy_retired WHERE kind='triple' AND id=?1 ORDER BY source"
+            )?
+            .query_map([id], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?
+        ),
         "claim" => claim_row(c, id)?,
         "claim_counters" => counters(c, id)?,
         "finding" => json_text(one("SELECT decision FROM findings WHERE id=?1")?.flatten())?,

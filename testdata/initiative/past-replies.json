@@ -1,0 +1,8 @@
+{
+  "1-1":{"actions":[
+    {"action":"create","id":"chart","owner":"person","kind":"task","title":"Send chart","line":1,"quote":"I will send the chart"},
+    {"action":"create","id":"meeting","owner":"person","kind":"task","title":"Attend lantern meeting","line":1,"quote":"attend the lantern meeting."}]},
+  "2-2":{"actions":[{"action":"update","id":"chart","line":2,"quote":"Use the blue chart."}]},
+  "3-3":{"actions":[{"action":"close","id":"chart","status":"done","line":3,"close_quote":"Okay sent."}]},
+  "4-4":{"actions":[{"action":"expire","id":"meeting","line":4,"close_quote":"The meeting date has passed."}]}
+}

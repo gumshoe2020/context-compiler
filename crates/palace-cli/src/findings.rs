@@ -53,7 +53,7 @@ fn print(o: &Options) -> Result<(), Error> {
         );
     }
     let store = ClaimStore::open(&crate::paths::input(&o.store)?)?;
-    let mut rows = described(&store, &filter(&store, o)?)?;
+    let mut rows = described(&store, &filter(&store, o)?, o.signal)?;
     if o.queue.is_some() {
         rows.retain(|r| QUEUE_KINDS.contains(&r["kind"].as_str().unwrap_or_default()));
     }
@@ -89,8 +89,16 @@ fn filter(store: &ClaimStore, o: &Options) -> Result<FindingFilter, Error> {
 }
 
 /// Each finding with its reply token and, for a claim finding, the claim's number and statement.
-fn described(store: &ClaimStore, filter: &FindingFilter) -> Result<Vec<Value>, Error> {
-    let mut rows = store.findings(filter)?;
+fn described(
+    store: &ClaimStore,
+    filter: &FindingFilter,
+    shared: bool,
+) -> Result<Vec<Value>, Error> {
+    let mut rows = if shared {
+        store.public_findings(filter)?
+    } else {
+        store.findings(filter)?
+    };
     for row in &mut rows {
         row["token"] = json!(reply_token(row["id"].as_str().unwrap_or_default()));
         let claim = row["claim"]

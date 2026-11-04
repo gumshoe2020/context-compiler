@@ -110,6 +110,19 @@ pub fn apply(c: &Connection, change: &Value, side: Side) -> Result<(), Error> {
     let kind = change["kind"].as_str().unwrap_or_default();
     match kind {
         "claim" => set_status(c, id, value)?,
+        "privacy_retired" => {
+            c.execute(
+                "DELETE FROM privacy_retired WHERE kind='triple' AND id=?1",
+                [id],
+            )?;
+            for source in value.as_array().ok_or("invalid retired support state")? {
+                c.execute(
+                    "INSERT INTO privacy_retired(kind,id,source) VALUES ('triple',?1,?2)",
+                    params![id, source.as_str().ok_or("invalid support source")?],
+                )?;
+            }
+            0
+        }
         "claim_counters_delta" => add_counters(c, id, value, other)?,
         "claim_counters" => c.execute(
             "UPDATE claims SET survived=?2, weakened=?3 WHERE id=?1",

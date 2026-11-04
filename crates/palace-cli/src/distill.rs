@@ -79,6 +79,27 @@ pub struct Options {
 }
 
 pub fn run(options: Options) -> Result<i32, Error> {
+    let session = transcript::session_id(&options.transcript);
+    let private = palace_store::privacy::conversation(&session, &options.wing).private;
+    run_inner(options).map_err(|e| {
+        if private {
+            {
+                let message = format!(
+                    "private distill failed id={}",
+                    palace_core::ids::sha256(session.as_bytes())
+                );
+                if palace_mempalace::Unavailable::is(&e) {
+                    palace_mempalace::Unavailable::error(message)
+                } else {
+                    message.into()
+                }
+            }
+        } else {
+            e
+        }
+    })
+}
+fn run_inner(options: Options) -> Result<i32, Error> {
     let source = Source::parse(&options.source)?;
     let transcript = crate::paths::input(&options.transcript)?;
     let text = fs::read_to_string(&transcript)
@@ -151,7 +172,12 @@ fn distill(options: &Options, run: Run, turns: &[(usize, Turn)]) -> Result<i32, 
         println!("DISTILL dry-run wing={} position={}", run.wing, run.to);
         return Ok(0);
     }
-    log_skips(&checked.reply, &checklist);
+    if !palace_store::privacy::conversation(&run.session, &run.wing).private {
+        log_skips(&checked.reply, &checklist);
+    }
+    if palace_store::privacy::conversation(&run.session, &run.wing).quarantine {
+        println!("PRIVACY QUARANTINE source={}", run.session);
+    }
     let code = distill_commit::commit(options, &run, &checked.reply, &lines, &checklist)?;
     record(options, run.to)?;
     Ok(code)
@@ -168,28 +194,33 @@ fn ask(
     checklist: &[(usize, Vec<String>)],
 ) -> Result<Option<Checked>, Error> {
     let model = model(options)?;
-    let policy = palace_core::names::in_prose(&fs::read_to_string(crate::paths::input(
-        &options.prompts.join("distill.md"),
-    )?)?);
+    let people = palace_store::privacy::identity().people.as_ref();
+    let policy = palace_core::names::in_prose(&crate::policy::load(
+        &options.prompts,
+        "distill.md",
+        people,
+    )?);
     let prompt =
         distill::prompt(&policy, &run.session, lines) + &distill::checklist_block(checklist);
-    let first = distill::check(&model.complete(&prompt)?, lines);
+    let audience =
+        crate::audience::approved_tags(palace_store::privacy::identity().people.as_ref());
+    let first = distill::check(&model.complete(&prompt)?, lines, &audience);
     if first.passed() {
         return Ok(Some(first));
     }
-    eprintln!("distill: retry: {}", problems(&first).join("; "));
+    eprintln!("distill: retry id={}", run.key);
     let retry = format!(
         "{prompt}\nYour previous answer failed its check: {}. Answer again, with one JSON object.\n",
         problems(&first).join("; ")
     );
-    let mut second = distill::check(&model.complete(&retry)?, lines);
+    let mut second = distill::check(&model.complete(&retry)?, lines, &audience);
     if !second.problems.is_empty() {
-        println!("DISTILL INVALID {}", json!(second.problems));
+        println!("DISTILL INVALID id={}", run.key);
         return Ok(None);
     }
     distill::demote_unquoted(&mut second);
-    for dropped in distill::drop_bad_skips(&mut second) {
-        eprintln!("distill: dropped after the retry: {dropped}");
+    for _dropped in distill::drop_bad_skips(&mut second) {
+        eprintln!("distill: dropped after the retry id={}", run.key);
     }
     Ok(Some(second))
 }
@@ -220,14 +251,23 @@ fn problems(checked: &Checked) -> Vec<String> {
 }
 
 fn model(options: &Options) -> Result<Box<dyn Model<Error = Error>>, Error> {
+    model_spec(
+        &options.llm,
+        &options.prompts,
+        options.model_timeout,
+        options.replay_reply.as_deref(),
+    )
+}
+pub(crate) fn model_spec(
+    llm: &str,
+    prompts: &Path,
+    seconds: u64,
+    replay_reply: Option<&Path>,
+) -> Result<Box<dyn Model<Error = Error>>, Error> {
     use palace_judge::command::{CommandModel, resolve_executable};
-    let llm = options.llm.as_str();
-    let timeout = Duration::from_secs(options.model_timeout);
+    let timeout = Duration::from_secs(seconds);
     if llm == "replay" {
-        let file = options
-            .replay_reply
-            .as_deref()
-            .ok_or("--llm replay needs --replay-reply <file>")?;
+        let file = replay_reply.ok_or("--llm replay needs --replay-reply <file>")?;
         return Ok(Box::new(Replay(fs::read_to_string(crate::paths::input(
             file,
         )?)?)));
@@ -237,7 +277,7 @@ fn model(options: &Options) -> Result<Box<dyn Model<Error = Error>>, Error> {
             .strip_prefix(':')
             .filter(|m| !m.is_empty())
             .unwrap_or("sonnet");
-        let settings = crate::paths::input(&options.prompts.join("judge-settings.json"))?;
+        let settings = crate::paths::input(&prompts.join("judge-settings.json"))?;
         let exe = resolve_executable("claude")?;
         return Ok(Box::new(
             CommandModel::claude(&exe, model, &settings)?.with_timeout(timeout),

@@ -19,6 +19,9 @@
 #   --llm              `palace rollup --llm` (replay | claude-cli[:model] | command:<exe>)
 #   --max-cluster      `palace rollup --max-cluster` (default: the rollup's own, 25): a thread
 #                      whose cluster holds more entries is skipped (ROLLUP SKIP, exit 0)
+#   ROLLUP_MIN_CLUSTER palace rollup's minimum writer cluster (default 3); ineligible threads
+#                      are skipped, no eligible thread exits 0 without paging.
+#   EXCLUDE_WINGS      comma/space separated wings excluded by palace rollup.
 #   --wing             `palace rollup --wing`: the wing the rollup is mined into (default: the
 #                      rollup's own, openclaw)
 #   --person, --assistant  `palace --person/--assistant` for every palace command: the two
@@ -61,7 +64,7 @@ set -u
 { command exec 9>&1; } 2>/dev/null || exec 9>/dev/null >/dev/null
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd) || exit 2
-PALACE="" DIARY="" KG="" PALACE_BIN="" SEND="" PAGE="" LLM="" JUDGE="" ROLLUP=0 STATE="" WING="" PERSON="" ASSISTANT="" MAX_CLUSTER=""
+PALACE="" DIARY="" KG="" PALACE_BIN="" SEND="" PAGE="" LLM="" JUDGE="" ROLLUP=0 STATE="" WING="" PERSON="" ASSISTANT="" MAX_CLUSTER="" AUDIENCE=""
 DELIVER="" # "" (asks and digest, as before the flags) | none | asks | only
 RETRIES=3 DELAY=120 SEND_TIMEOUT=60
 CANARIES="$ROOT/fixtures/canaries.json"
@@ -102,6 +105,7 @@ while [ $# -gt 0 ]; do
     --mempalace-check) CHECK="$2" ;;
     --wing) WING="$2" ;;
     --max-cluster) MAX_CLUSTER="$2" ;;
+    --audience) AUDIENCE="$2" ;;
     --person) PERSON="$2" ;;
     --assistant) ASSISTANT="$2" ;;
     *) die "unknown option: $1" ;;
@@ -406,7 +410,7 @@ watch_with_judge() {
 run_stages() {
   [ "$ROLLUP" -eq 0 ] || stage rollup palace rollup --diary "$DIARY" --palace "$PALACE" \
     --kg "$KG" --llm "$LLM" --prompts "$ROOT/prompts" --canaries "$CANARIES" \
-    --keep "$STATE/rollup-attempts" ${WING:+--wing "$WING"} ${MAX_CLUSTER:+--max-cluster "$MAX_CLUSTER"}
+    --keep "$STATE/rollup-attempts" ${WING:+--wing "$WING"} ${MAX_CLUSTER:+--max-cluster "$MAX_CLUSTER"} ${AUDIENCE:+--audience "$AUDIENCE"}
   stage watch watch_with_judge
   stage auto palace improve --auto --kg "$KG" --palace "$PALACE" --diary "$DIARY" \
     --store "$STORE" ${JUDGE:+--judge "$JUDGE"}

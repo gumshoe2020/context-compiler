@@ -77,6 +77,22 @@ impl Graph {
         let c = &self.store.connection;
         let resolved = lookup::resolve(c, request.target)?;
         let claim = lookup::claim(c, &resolved.claim_id)?.ok_or("claim vanished")?;
+        if let Some(session) = &crate::privacy::conversation_id() {
+            let current = crate::privacy::conversation(session, "");
+            let markers = crate::privacy::markers(c, "claim", &resolved.claim_id)?;
+            if current.private
+                && (current.quarantine
+                    || markers.is_empty()
+                    || markers
+                        .iter()
+                        .any(|m| !m.private || m.audience != current.audience))
+            {
+                return Err(Refused::error(format!(
+                    "source conversation cannot mutate claim {} across audiences",
+                    resolved.claim_id
+                )));
+            }
+        }
         let listed = first_listed(&claim)?;
         let (text, (disputes, undisputes)) =
             checked(c, request, &claim, resolved.finding.as_deref())?;
@@ -84,7 +100,15 @@ impl Graph {
         let anchor = anchor_claim(&claim)?;
         let (new_claims, coinage) = new_claims(c, request.verb, &text, &anchor, &listed)?;
         check_regrounding(c, request, &anchor, &new_claims)?;
-        let proposals = proposals(request.verb, request.by, &anchor, &new_claims);
+        let mut proposals = proposals(request.verb, request.by, &anchor, &new_claims);
+        let marked = crate::privacy::markers(c, "claim", &anchor.id)?
+            .iter()
+            .any(|m| m.private || !m.people.is_empty());
+        if marked || crate::privacy::conversation_id().is_some() {
+            for proposal in &mut proposals {
+                proposal.transcript = Some(anchor.id.clone());
+            }
+        }
         Ok(Prepared {
             verb: request.verb,
             by: request.by.to_owned(),
@@ -761,6 +785,7 @@ fn edge(
         claim: Some(claim.number.clone()),
         claim_id: Some(claim.id.clone()),
         transcript: None,
+        evidence_names: kind.map(|_| [claim.subject.clone(), claim.object.clone()]),
     }
 }
 
@@ -772,6 +797,13 @@ fn insert_claims(c: &Connection, p: &Prepared, at: &str) -> Result<Vec<Value>, E
         c.execute(
             "INSERT INTO claims(id,number,rollup,subject,predicate,object,date,source,quote,status,confidence_base,first_seen) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'live',0.60,?10)",
             params![n.id, n.number, l["rollup"].as_str(), n.subject, n.predicate, n.object, n.date, n.source, n.quote, at],
+        )?;
+        crate::privacy::inherit(
+            c,
+            "claim",
+            &n.id,
+            "claim",
+            p.claim["id"].as_str().unwrap_or_default(),
         )?;
         c.execute(
             "INSERT INTO claim_numbers(rollup,number,claim_id,date,thread) VALUES (?1,?2,?3,?4,?5)",

@@ -28,8 +28,13 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct Options {
+    /// shared (default), comma-separated person IDs, or each admitted exact audience.
+    #[arg(long, default_value = "shared")]
+    pub audience: String,
+    #[arg(skip)]
+    pub exact_audience: palace_store::privacy::Audience,
     /// Diary root: the parent of `diary/`.
     #[arg(long)]
     pub diary: PathBuf,
@@ -81,6 +86,12 @@ pub struct Options {
     /// (`ROLLUP SKIP thread=<t> cluster=<n> over the cap`, exit 0, a `rollup_skip` event).
     #[arg(long, default_value_t = rollup_cluster::MAX_CLUSTER as u64, value_parser = clap::value_parser!(u64).range(1..))]
     pub max_cluster: u64,
+    /// Minimum entries actually supplied to the writer (ROLLUP_MIN_CLUSTER; default 3).
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    pub min_cluster: Option<u64>,
+    /// Wings excluded from this rollup (also reads comma/space separated EXCLUDE_WINGS).
+    #[arg(long, value_parser = crate::wing_name)]
+    pub exclude_wing: Vec<String>,
     #[command(flatten)]
     pub connection: crate::MemPalaceOptions,
 }
@@ -92,12 +103,20 @@ pub const EXIT_BROKEN: i32 = 2;
 pub fn exit_code(result: Result<i32, Error>) -> i32 {
     match result.map_err(palace_store::busy::named) {
         Ok(code) => code,
+        Err(error)
+            if error
+                .downcast_ref::<crate::rollup_write::EmptyCluster>()
+                .is_some() =>
+        {
+            privacy_log!("ROLLUP SKIP {error}");
+            0
+        }
         Err(error) if Unavailable::is(&error) || palace_store::busy::Busy::is(&error) => {
-            eprintln!("rollup: {error}");
+            privacy_log!("rollup: {error}");
             EXIT_UNAVAILABLE
         }
         Err(error) => {
-            eprintln!("palace rollup: {error}");
+            privacy_log!("palace rollup: {error}");
             EXIT_BROKEN
         }
     }
@@ -121,12 +140,80 @@ pub(crate) struct Run {
     canaries: Vec<Canary>,
     generic: GenericTags,
 }
-pub fn run(options: Options) -> Result<i32, Error> {
+pub fn run(mut options: Options) -> Result<i32, Error> {
+    if options.audience != "each" {
+        options.exact_audience = options.audience.parse()?;
+        return run_one(options);
+    }
+    if options.rescan_supersession.is_some() {
+        return Err(
+            "--audience each cannot rescan a single rollup; select its exact audience".into(),
+        );
+    }
+    let root = crate::paths::diary_root(&options.diary)?;
+    let diary = Diary::open(&root.join("diary"))?;
+    let store = crate::paths::input(&crate::rollup_commit::compiler_path(&options.kg)?)?;
+    let c =
+        rusqlite::Connection::open_with_flags(store, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let audiences = palace_store::privacy::Audience::discover(&c, &diary.names()?)?;
+    drop(c);
+    // Suppress private diagnostics before any pass; a failed audience reveals no content.
+    crate::privacy::sensitive(audiences.iter().any(|a| a.private()));
+    let mut status = 0;
+    for (index, audience) in audiences.into_iter().enumerate() {
+        let mut pass = options.clone();
+        pass.exact_audience = audience;
+        let code = exit_code(run_one(pass));
+        if code != 0 {
+            eprintln!("ROLLUP audience-pass={index} failed exit={code}");
+            // Broken > unavailable > invalid, independent of iteration order.
+            status = match (status, code) {
+                (EXIT_BROKEN, _) | (_, EXIT_BROKEN) => EXIT_BROKEN,
+                (EXIT_UNAVAILABLE, _) | (_, EXIT_UNAVAILABLE) => EXIT_UNAVAILABLE,
+                _ => EXIT_INVALID,
+            };
+        }
+    }
+    Ok(status)
+}
+fn run_one(mut options: Options) -> Result<i32, Error> {
+    crate::privacy::sensitive(options.exact_audience.private());
+    options.min_cluster = Some(match options.min_cluster {
+        Some(value) => value,
+        None => match std::env::var("ROLLUP_MIN_CLUSTER") {
+            Ok(value) => value
+                .parse::<u64>()
+                .ok()
+                .filter(|n| *n > 0)
+                .ok_or("ROLLUP_MIN_CLUSTER must be a positive integer")?,
+            Err(_) => rollup_prep::MIN_SUBSTANTIVE as u64,
+        },
+    });
+    for wing in std::env::var("EXCLUDE_WINGS")
+        .unwrap_or_default()
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.is_empty())
+    {
+        options.exclude_wing.push(crate::wing_name(wing)?);
+    }
+    if options.exclude_wing.contains(&options.wing) {
+        privacy_print!(
+            "ROLLUP SKIP thread={} in an excluded wing {}\nPalace compression: no rollup due",
+            options.thread.as_deref().unwrap_or("*"),
+            options.wing
+        );
+        return Ok(0);
+    }
     if let Some(file) = &options.rescan_supersession {
         return crate::rollup_reference::rescan(&options, file);
     }
     let root = crate::paths::diary_root(&options.diary)?;
-    let diary = Diary::open(&root.join("diary"))?;
+    let mut diary = Diary::open(&root.join("diary"))?;
+    crate::privacy::filter_audience_diary(
+        &mut diary,
+        &crate::rollup_commit::compiler_path(&options.kg)?,
+        &options.exact_audience,
+    )?;
     let keep = options
         .keep
         .as_deref()
@@ -141,8 +228,13 @@ pub fn run(options: Options) -> Result<i32, Error> {
         None => palace_core::diary_file::new_york_date(now_millis()?),
     };
     let recent = prep(&options, &diary, &as_of)?;
-    if rollup_prep::should_bail(&recent) {
-        println!("{}", rollup_prep::QUIET);
+    if recent.substantive.len()
+        < options
+            .min_cluster
+            .unwrap_or(rollup_prep::MIN_SUBSTANTIVE as u64)
+            .min(rollup_prep::MIN_SUBSTANTIVE as u64) as usize
+    {
+        privacy_print!("{}", rollup_prep::QUIET);
         return Ok(0);
     }
     let prompts = crate::paths::input(&options.prompts)?;
@@ -168,7 +260,7 @@ fn generic_tags(prompts: &Path) -> Result<GenericTags, Error> {
     let text = match file.exists() {
         true => fs::read_to_string(crate::paths::input(&file)?)?,
         false => {
-            eprintln!(
+            privacy_log!(
                 "palace: {} not found: the built-in generic tag list is used",
                 file.display()
             );
@@ -213,7 +305,7 @@ fn prep(options: &Options, diary: &Diary, as_of: &str) -> Result<Recent, Error> 
     let since = rollup_prep::parse_since(&options.since)?;
     let recent = rollup_prep::recent(diary, as_of, since)?;
     let (entries, substantive) = (recent.entries.len(), recent.substantive.len());
-    eprintln!("rollup: prep as_of={as_of} recent={entries} substantive={substantive}");
+    privacy_log!("rollup: prep as_of={as_of} recent={entries} substantive={substantive}");
     Ok(recent)
 }
 fn models_and_canaries(
@@ -237,7 +329,7 @@ fn resume_orphans(options: &Options, root: &Path, diary: &Diary) -> Result<(), E
     let (models, canaries) = models_and_canaries(options, &crate::paths::input(&options.prompts)?)?;
     for orphan in orphans {
         let (file, thread) = (&orphan.file, &orphan.thread);
-        eprintln!(
+        privacy_log!(
             "rollup: orphan {file} (thread {thread}, as-of {}): resuming",
             orphan.as_of
         );
@@ -248,6 +340,7 @@ fn resume_orphans(options: &Options, root: &Path, diary: &Diary) -> Result<(), E
             kg: &options.kg,
             connection: &options.connection,
             wing: &options.wing,
+            audience: &options.exact_audience,
             thread: orphan.thread.clone(),
             as_of: &orphan.as_of,
             judge: models.judge.as_deref(),
@@ -260,9 +353,12 @@ fn resume_orphans(options: &Options, root: &Path, diary: &Diary) -> Result<(), E
 }
 impl Run {
     fn stages(&self, recent: &Recent) -> Result<i32, Error> {
-        let Some((thread, tags)) = self.select(recent)? else {
+        let evidence = self.connect()?;
+        let Some(cluster) = self.select(recent, &evidence)? else {
+            privacy_print!("Palace compression: no rollup due");
             return Ok(0);
         };
+        let thread = cluster.thread.clone();
         let target = Target {
             thread: &thread,
             as_of: &self.as_of,
@@ -270,8 +366,6 @@ impl Run {
         if let Some(code) = self.resume_prior(&target)? {
             return Ok(code);
         }
-        let evidence = self.connect()?;
-        let cluster = self.pull(&target, &tags, &evidence)?;
         if cluster.size() as u64 > self.options.max_cluster {
             return self.skip(&thread, cluster.size());
         }
@@ -290,7 +384,7 @@ impl Run {
         }
         let last = attempts.last().ok_or("no write attempt")?;
         if !last.validation.passed() {
-            println!("{}", serde_json::to_string_pretty(&last.report)?);
+            privacy_print!("{}", serde_json::to_string_pretty(&last.report)?);
             return Ok(EXIT_INVALID);
         }
         let report = &last.report;
@@ -299,7 +393,7 @@ impl Run {
         let (body, _) = crate::rollup_reference::mark(&self.options.kg, &names, &last.body)?;
         let body = &body;
         if self.options.dry_run {
-            println!("{body}\n{}", serde_json::to_string_pretty(&report)?);
+            privacy_print!("{body}\n{}", serde_json::to_string_pretty(&report)?);
             return Ok(0);
         }
         drop(evidence); // mempalace-mcp must not hold the palace open while mine writes it
@@ -316,9 +410,9 @@ impl Run {
             let at = palace_core::diary_file::iso_millis(now_millis()?);
             palace_store::claims::ClaimStore::open(&store)?.log(&json!({
                 "operation": "rollup_skip", "thread": thread, "cluster": size, "cap": cap,
-                "as_of": self.as_of, "at": &at[..19]}))?;
+                "as_of": self.as_of, "private": self.options.exact_audience.private(), "at": &at[..19]}))?;
         }
-        println!("{line}");
+        privacy_print!("{line}");
         Ok(0)
     }
     pub(crate) fn diary_names(&self) -> Result<Vec<String>, Error> {
@@ -327,9 +421,16 @@ impl Run {
     fn connect(&self) -> Result<Evidence, Error> {
         let diary = self.root.join("diary");
         let connection = &self.options.connection;
-        connection
+        let mut evidence = connection
             .evidence(&self.options.palace, &diary)
-            .map_err(Unavailable::error)
+            .map_err(Unavailable::error)?;
+        evidence.diary = Diary::open(&diary)?;
+        crate::privacy::filter_audience_diary(
+            &mut evidence.diary,
+            &crate::rollup_commit::compiler_path(&self.options.kg)?,
+            &self.options.exact_audience,
+        )?;
+        Ok(evidence)
     }
     /// M4b.1 S-4: a rollup already committed for this thread + as-of is resumed, not rewritten.
     fn resume_prior(&self, target: &Target) -> Result<Option<i32>, Error> {
@@ -340,7 +441,7 @@ impl Run {
         let Some(file) = crate::rollup_commit::find_prior(&inputs, &target.title())? else {
             return Ok(None);
         };
-        eprintln!(
+        privacy_log!(
             "rollup: resume {file} (already committed: {})",
             target.title()
         );
@@ -358,49 +459,88 @@ impl Run {
             as_of: &self.as_of,
             generic: &self.generic,
         };
-        let cluster = rollup_cluster::pull(&self.diary, &evidence.searcher, &request)
+        let searcher = WingSearch {
+            searcher: &evidence.searcher,
+            wing: &self.options.wing,
+        };
+        let cluster = rollup_cluster::pull(&self.diary, &searcher, &request)
             .map_err(|e| transport_or(evidence, e))?;
         report_pull(&cluster);
         Ok(cluster)
     }
-    fn select(&self, recent: &Recent) -> Result<Option<(String, Vec<String>)>, Error> {
+    fn select(&self, recent: &Recent, evidence: &Evidence) -> Result<Option<Cluster>, Error> {
         if let Some(thread) = &self.options.thread {
-            eprintln!("rollup: select thread={thread} (given)");
-            return Ok(Some((thread.clone(), Vec::new())));
+            privacy_log!("rollup: select thread={thread} (given)");
+            return self.eligible(thread, &[], evidence);
         }
-        let candidates = rollup_prep::candidates(recent);
-        if candidates.is_empty() {
-            println!("Palace compression: no candidate thread");
+        let mut candidates = rollup_prep::candidates(recent);
+        loop {
+            if candidates.is_empty() {
+                privacy_print!("Palace compression: no candidate thread");
+                return Ok(None);
+            }
+            let names = self.diary.names()?;
+            let threads = rollup_cluster::rollup_threads(&self.diary, &names, &self.as_of)?;
+            let reply = self.models.select.complete(&rollup_select::prompt(
+                &self.policy,
+                recent,
+                &candidates,
+                &threads,
+            ))?;
+            let selection = rollup_select::parse(&reply, &candidates)?;
+            let tags = selection.tags(&candidates);
+            let entry_tags = selection.entry_tags(&candidates, recent);
+            match selection {
+                Selection::Bail { reason } => {
+                    privacy_print!("Palace compression: model bailed: {reason}");
+                    return Ok(None);
+                }
+                Selection::Thread {
+                    thread,
+                    candidate_ids,
+                    ..
+                } => {
+                    let (thread, kept) = self.kept_thread(thread, &entry_tags)?;
+                    privacy_log!(
+                        "rollup: select thread={thread}{kept} candidates={candidate_ids:?} tags={tags:?}"
+                    );
+                    let cluster = self.eligible(&thread, &tags, evidence)?;
+                    if cluster.is_some() {
+                        return Ok(cluster);
+                    }
+                    candidates.retain(|c| !candidate_ids.contains(&c.id));
+                    continue;
+                }
+            }
+        }
+    }
+    fn eligible(
+        &self,
+        thread: &str,
+        tags: &[String],
+        evidence: &Evidence,
+    ) -> Result<Option<Cluster>, Error> {
+        let cluster = self.pull(
+            &Target {
+                thread,
+                as_of: &self.as_of,
+            },
+            tags,
+            evidence,
+        )?;
+        if let Some(reason) = rollup_cluster::ineligible(
+            &cluster,
+            self.options
+                .min_cluster
+                .unwrap_or(rollup_prep::MIN_SUBSTANTIVE as u64),
+        ) {
+            privacy_print!(
+                "ROLLUP SKIP thread={thread} cluster={} {reason}",
+                cluster.members.len()
+            );
             return Ok(None);
         }
-        let names = self.diary.names()?;
-        let threads = rollup_cluster::rollup_threads(&self.diary, &names, &self.as_of)?;
-        let reply = self.models.select.complete(&rollup_select::prompt(
-            &self.policy,
-            recent,
-            &candidates,
-            &threads,
-        ))?;
-        let selection = rollup_select::parse(&reply, &candidates)?;
-        let tags = selection.tags(&candidates);
-        let entry_tags = selection.entry_tags(&candidates, recent);
-        match selection {
-            Selection::Bail { reason } => {
-                println!("Palace compression: model bailed: {reason}");
-                Ok(None)
-            }
-            Selection::Thread {
-                thread,
-                candidate_ids,
-                ..
-            } => {
-                let (thread, kept) = self.kept_thread(thread, &entry_tags)?;
-                eprintln!(
-                    "rollup: select thread={thread}{kept} candidates={candidate_ids:?} tags={tags:?}"
-                );
-                Ok(Some((thread, tags)))
-            }
-        }
+        Ok(Some(cluster))
     }
     pub(crate) fn validate(
         &self,
@@ -528,12 +668,34 @@ impl Run {
             kg: &self.options.kg,
             connection: &self.options.connection,
             wing: &self.options.wing,
+            audience: &self.options.exact_audience,
             thread: thread.to_owned(),
             as_of: &self.as_of,
             judge: self.models.judge.as_deref(),
             llm: &self.options.llm,
             canaries: &self.canaries,
         }
+    }
+}
+/// Search has the same wing boundary as the diary root; unrelated wings cannot seed pulls.
+struct WingSearch<'a> {
+    searcher: &'a palace_mempalace::MemPalace,
+    wing: &'a str,
+}
+impl palace_core::traits::Searcher for WingSearch<'_> {
+    type Error = Error;
+    fn search(
+        &self,
+        query: &str,
+        limit: usize,
+        distance: f64,
+    ) -> Result<Vec<palace_core::search_hit::SearchHit>, Error> {
+        Ok(self
+            .searcher
+            .search_in(query, limit, distance, Some(self.wing))?
+            .into_iter()
+            .filter(|hit| hit.wing == self.wing)
+            .collect())
     }
 }
 fn report_pull(cluster: &Cluster) {
@@ -544,7 +706,7 @@ fn report_pull(cluster: &Cluster) {
             .filter(|m| m.label() == label)
             .count()
     };
-    eprintln!(
+    privacy_log!(
         "rollup: pull entries={} primaries={} reference_only={} bookkeeping={} prior_rollups={:?} dropped={}",
         cluster.members.len(),
         count("primary"),
@@ -642,10 +804,81 @@ mod tests {
     #[test]
     fn exit_codes_are_mapped_by_type() {
         assert_eq!(exit_code(Ok(4)), EXIT_INVALID);
+        assert_eq!(
+            exit_code(Err(Box::new(crate::rollup_write::EmptyCluster))),
+            0
+        );
         assert_eq!(exit_code(Err(Unavailable::error("EOF"))), EXIT_UNAVAILABLE);
         assert_eq!(
             exit_code(Err("MemPalace unavailable: looks alike".into())),
             EXIT_BROKEN
         );
+    }
+
+    #[test]
+    fn empty_writer_refuses_before_any_model_or_attempt() {
+        use clap::Parser;
+        use std::os::unix::fs::PermissionsExt;
+        struct NoModel;
+        impl Model for NoModel {
+            type Error = Error;
+            fn complete(&self, _: &str) -> Result<String, Error> {
+                panic!("empty writer input called a model");
+            }
+        }
+        #[derive(Parser)]
+        struct Cli {
+            #[command(flatten)]
+            options: Options,
+        }
+        let root = crate::paths::root();
+        let work = root.join("target/rollup-pick/writer-refusal");
+        fs::create_dir_all(work.join("diary")).unwrap();
+        let mcp = work.join("mcp.py");
+        fs::copy(root.join("testdata/rollup-pick/mcp.py"), &mcp).unwrap();
+        fs::set_permissions(&mcp, fs::Permissions::from_mode(0o755)).unwrap();
+        palace_mempalace::version::set_default_script(root.join("scripts/mempalace-check.sh"));
+        // Handshake only; any evidence search would need the stand-in's PICK_WORK env.
+        let searcher = palace_mempalace::MemPalace::open(&work, &mcp, &mcp, false).unwrap();
+        let evidence = Evidence {
+            searcher,
+            diary: Diary::open(&work.join("diary")).unwrap(),
+        };
+        let options =
+            Cli::parse_from(["palace", "--diary", "d", "--palace", "p", "--kg", "k"]).options;
+        let run = Run {
+            options,
+            keep: Some(work.join("kept")),
+            root: work.clone(),
+            diary: Diary::open(&work.join("diary")).unwrap(),
+            as_of: "2031-05-10".into(),
+            policy: String::new(),
+            models: Backends {
+                select: Box::new(NoModel),
+                write: Box::new(NoModel),
+                repair: Box::new(NoModel),
+                judge: None,
+            },
+            canaries: vec![],
+            generic: GenericTags::default(),
+        };
+        let cluster = Cluster::default();
+        let target = Target {
+            thread: "empty",
+            as_of: "2031-05-10",
+        };
+        let result = run.write_validated(&crate::rollup_write::Job {
+            target: &target,
+            cluster: &cluster,
+            evidence: &evidence,
+        });
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .downcast_ref::<crate::rollup_write::EmptyCluster>()
+                .is_some()
+        );
+        assert!(!work.join("kept").exists());
     }
 }

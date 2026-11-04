@@ -19,8 +19,8 @@ use std::{
 pub fn keep_reporting(dir: &Path, run: &str, attempts: &[Attempt]) {
     match keep(dir, run, attempts) {
         Ok(0) => {}
-        Ok(n) => eprintln!("rollup: kept {n} attempt(s) in {}", dir.display()),
-        Err(error) => eprintln!("rollup: --keep {}: {error}", dir.display()),
+        Ok(n) => privacy_log!("rollup: kept {n} attempt(s) in {}", dir.display()),
+        Err(error) => privacy_log!("rollup: --keep {}: {error}", dir.display()),
     }
 }
 

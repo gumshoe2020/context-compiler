@@ -1,4 +1,9 @@
 #![forbid(unsafe_code)]
+mod backup_filter;
+macro_rules! privacy_log { ($($arg:tt)*) => { crate::privacy::diagnostic(format_args!($($arg)*),false) }; }
+macro_rules! privacy_print { ($($arg:tt)*) => { crate::privacy::diagnostic(format_args!($($arg)*),true) }; }
+mod audience;
+mod audience_apply;
 mod auto;
 mod auto_ground;
 mod canary_out;
@@ -6,9 +11,11 @@ mod context;
 mod context_layered;
 mod delivery;
 mod depends;
+mod diary_write;
 mod digest;
 mod distill;
 mod distill_commit;
+mod memory_status;
 // The acceptance doctors, their test kit and the fixture-backed tests (PUB-1a item 3): private,
 // in src/doctors/; `cfg(doctors)` is build.rs's (Cargo.toml `doctors`).
 #[cfg(doctors)]
@@ -24,10 +31,14 @@ mod graph;
 mod graph_commands;
 mod improve;
 mod init;
+mod items;
 mod paths;
 #[cfg(doctors)] // used by the doctors only (and by tests/pin_failclosed.rs, through #[path])
 mod pin_probe;
+mod policy;
+mod privacy;
 mod recovery;
+mod search;
 
 mod regress;
 mod reply;
@@ -61,11 +72,42 @@ struct Cli {
     /// The assistant's `--by` name, whose queue holds the reversals (as `--person`).
     #[arg(long, global = true)]
     assistant: Option<String>,
+    /// Exact identity map (default: people.json in the install root, when present).
+    #[arg(long, global = true)]
+    people_map: Option<PathBuf>,
+    /// Authenticated source session key, supplied by the adapter, never the model.
+    #[arg(long, global = true)]
+    conversation: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
 #[derive(Subcommand)]
 enum Command {
+    /// File a marker-aware entry in the main diary.
+    DiaryWrite {
+        #[command(flatten)]
+        args: diary_write::Options,
+    },
+    /// Owner-only palace overview, counts only.
+    Status {
+        #[command(flatten)]
+        args: memory_status::Options,
+    },
+    /// Read-only memory search, filtered by the authenticated --conversation's markers.
+    Search {
+        #[command(flatten)]
+        args: search::Options,
+    },
+    /// Compiler privacy provenance: exact identity resolution and audited migration plan.
+    Privacy {
+        #[command(subcommand)]
+        operation: privacy::Operation,
+    },
+    /// The conversation open-items ledger.
+    Items {
+        #[command(subcommand)]
+        operation: items::Operation,
+    },
     Watch {
         #[command(flatten)]
         args: watch::Options,
@@ -244,6 +286,12 @@ impl MemPalaceOptions {
         if !palace.is_dir() {
             return Err("--palace must be a directory".into());
         }
+        let mut diary = palace_mempalace::diary::Diary::open(&paths::input(diary)?)?;
+        crate::privacy::filter_diary(
+            &mut diary,
+            &palace.join("compiler.sqlite"),
+            &crate::privacy::current_readers(),
+        )?;
         Ok(palace_mempalace::Evidence {
             searcher: palace_mempalace::MemPalace::open(
                 &palace,
@@ -251,7 +299,7 @@ impl MemPalaceOptions {
                 &self.mempalace,
                 self.allow_mempalace_version,
             )?,
-            diary: palace_mempalace::diary::Diary::open(&paths::input(diary)?)?,
+            diary,
         })
     }
 }
@@ -268,6 +316,50 @@ fn main() {
 }
 fn run() -> Result<(), Error> {
     let cli = Cli::parse();
+    let people_path = cli
+        .people_map
+        .clone()
+        .unwrap_or_else(|| paths::root().join("people.json"));
+    let people = if cli.people_map.is_some() || people_path.is_file() {
+        let roots = if cli.roots.is_empty() {
+            vec![paths::root()]
+        } else {
+            cli.roots.clone()
+        };
+        let path = people_path.canonicalize()?;
+        if !roots
+            .iter()
+            .any(|r| r.canonicalize().is_ok_and(|r| path.starts_with(r)))
+        {
+            return Err("people map outside --roots".into());
+        }
+        Some(palace_store::privacy::People::parse(
+            &std::fs::read_to_string(path)?,
+        )?)
+    } else {
+        None
+    };
+    palace_store::privacy::configure(palace_store::privacy::Identity {
+        people,
+        conversation: cli.conversation.clone(),
+        local_operator: true,
+    })?;
+    if let Command::Items { operation } = cli.command {
+        paths::configure(cli.roots)?;
+        return items::run(operation, cli.person.as_deref());
+    }
+    if let Command::Search { args } = cli.command {
+        paths::configure(cli.roots)?;
+        return search::run(args);
+    }
+    if let Command::DiaryWrite { args } = cli.command {
+        paths::configure(cli.roots)?;
+        return diary_write::run(args);
+    }
+    if let Command::Status { args } = cli.command {
+        paths::configure(cli.roots)?;
+        return memory_status::run(args);
+    }
     palace_mempalace::version::set_default_script(paths::root().join("scripts/mempalace-check.sh"));
     // Before dispatch an error is "broken" (2), never a command's own exit 1 ("findings",
     // "differences"; M5b-1 item 9, review S-6).
@@ -298,7 +390,13 @@ fn run() -> Result<(), Error> {
 /// never falls back to the owner's names: a command that may record or check a role needs both.
 /// PUB-1a item 2: nor does a build without owner names (`palace_core::names::OWNER`).
 fn explicit_names(cli: &Cli) -> Result<(), String> {
-    let roles = !matches!(cli.command, Command::Context { .. } | Command::Init { .. });
+    let roles = !matches!(
+        cli.command,
+        Command::Context { .. }
+            | Command::Init { .. }
+            | Command::Privacy { .. }
+            | Command::Search { .. }
+    );
     names_needed(
         cfg!(feature = "owner-defaults") && palace_core::names::OWNER.is_some(),
         roles,
@@ -320,7 +418,22 @@ fn names_needed(
 
 /// Commands that report through their exit code exit here; the rest return.
 fn dispatch(command: Command) -> Result<(), Error> {
+    if let Command::Privacy { operation } = command {
+        return privacy::run(operation);
+    }
     let code = match command {
+        Command::Search { args } => {
+            search::run(args)?;
+            0
+        }
+        Command::DiaryWrite { args } => {
+            diary_write::run(args)?;
+            0
+        }
+        Command::Status { args } => {
+            memory_status::run(args)?;
+            0
+        }
         Command::Watch { args } => watch_code(args),
         Command::ProposeBatch {
             paths,

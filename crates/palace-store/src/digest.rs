@@ -12,6 +12,13 @@ impl ClaimStore {
         let c = &self.store.connection;
         let mut timed = Vec::new();
         for logged in logged_events(c, since)? {
+            let ids = [text(&logged, "from_claim"), text(&logged, "to_claim")];
+            if ids
+                .iter()
+                .any(|id| crate::privacy::private(c, "claim", id).unwrap_or(true))
+            {
+                continue;
+            }
             if !undone(c, &logged)? {
                 timed.push((text(&logged, "at"), event(c, &logged)?));
             }
@@ -91,9 +98,10 @@ fn status_change(logged: &Value, claim_id: &str, claim: &Value) -> (String, Stri
 }
 
 fn escalations(c: &Connection, since: &str) -> Result<Vec<(String, Correction)>, Error> {
-    let mut s = c.prepare(
-        "SELECT asked_at, claim, token, proposal FROM asks WHERE kind='escalated' AND asked_at>=?1",
-    )?;
+    let visible = crate::privacy::shared_only("ask", "asks.finding");
+    let mut s = c.prepare(&format!(
+        "SELECT asked_at, claim, token, proposal FROM asks WHERE kind='escalated' AND asked_at>=?1 AND {visible}"
+    ))?;
     let rows: Vec<(String, String, String, Option<String>)> = s
         .query_map([since], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
@@ -101,6 +109,9 @@ fn escalations(c: &Connection, since: &str) -> Result<Vec<(String, Correction)>,
         .collect::<Result<_, _>>()?;
     let mut out = Vec::new();
     for (at, claim_id, token, proposal) in rows {
+        if crate::privacy::private(c, "claim", &claim_id)? {
+            continue;
+        }
         let claim = lookup::claim(c, &claim_id)?.unwrap_or_default();
         let now = text(&claim, "status");
         out.push((at, escalation(&claim, token, proposal, now)));

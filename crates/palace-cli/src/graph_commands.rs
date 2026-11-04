@@ -13,6 +13,8 @@ pub struct ReadOptions {
     #[command(flatten)]
     pub paths: GraphPaths,
     pub entity: String,
+    #[arg(long, value_delimiter = ',')]
+    pub readers: Option<Vec<String>>,
     #[arg(long, default_value_t = 2)]
     pub max_hops: usize,
     #[arg(long, default_value_t = 800)]
@@ -30,7 +32,16 @@ impl ReadOptions {
     }
 }
 pub fn read(args: ReadOptions, task: Option<Task>) -> Result<(), Error> {
-    let graph = GraphReader::open(&crate::paths::input(&args.paths.kg)?)?;
+    let mut graph = GraphReader::open(&crate::paths::input(&args.paths.kg)?)?;
+    let readers = args
+        .readers
+        .clone()
+        .unwrap_or_else(crate::privacy::current_readers);
+    let valid = palace_store::privacy::identity()
+        .people
+        .as_ref()
+        .is_some_and(|p| readers.iter().all(|id| p.knows(id)));
+    graph = graph.with_readers(if valid { readers } else { Vec::new() });
     let result = match task {
         Some(task) => compile(&graph, &args.entity, task, args.options())?,
         None => traverse(&graph, &args.entity, args.options())?,

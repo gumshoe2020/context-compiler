@@ -227,17 +227,19 @@ fn propose_step(
     if done || commit.reply.relations.is_empty() || commit.files.is_empty() {
         return Ok(count(&logged));
     }
-    let evidence = options
+    let mut evidence = options
         .connection
         .evidence(&options.palace, &commit.wing_root.join("diary"))
         .map_err(|e| Unavailable::error(format!("after mine: {e}")))?;
+    let marker = ClaimStore::open(store)?.privacy_source(&commit.copy)?;
+    evidence.diary = palace_mempalace::diary::Diary::open(&commit.wing_root.join("diary"))?;
+    crate::privacy::filter_gate_diary(&mut evidence.diary, store, &marker)?;
     let mut graph = crate::graph::open(&crate::graph::GraphPaths {
         palace: Some(options.palace.clone()),
         kg: options.kg.clone(),
         wal: None,
     })?;
     let mut outcomes = logged;
-    let title = &commit.reply.entries[0].title;
     for (index, r) in commit.reply.relations.iter().enumerate() {
         if outcomes.iter().any(|(i, _)| *i == index) {
             continue;
@@ -246,9 +248,14 @@ fn propose_step(
             from: r.subject.clone(),
             to: r.object.clone(),
             relation: r.predicate.clone(),
-            evidence: vec![EvidenceReference {
-                query: title.clone(),
-            }],
+            evidence: commit
+                .files
+                .iter()
+                .chain(commit.reply.entries.iter().map(|entry| &entry.title))
+                .map(|query| EvidenceReference {
+                    query: query.clone(),
+                })
+                .collect(),
             confidence: r.confidence,
             supplied_by: "palace-distill".into(),
             from_type: None,
@@ -256,6 +263,7 @@ fn propose_step(
             claim: None,
             claim_id: None,
             transcript: Some(format!("{}:{}", commit.copy, r.line)),
+            evidence_names: None,
         };
         let now = graph.now()?;
         let result = propose_relation(&evidence, &mut graph, &proposal, &now, "palace-distill")
@@ -264,22 +272,42 @@ fn propose_step(
             return Err(Unavailable::error(format!("during distill: {reason}")));
         }
         let outcome = match (result["ok"] == true, result["value"]["created"] == true) {
+            (false, _) if palace_core::write_gate::skipped_no_evidence(&result) => {
+                "relation_skipped_no_evidence"
+            }
             (false, _) => "rejected",
             (true, true) => "created",
             (true, false) => "cited",
         };
-        eprintln!("distill: relation {index} {outcome}: {result}");
+        eprintln!(
+            "distill: relation {index} {outcome} triple_id={}",
+            result["value"]["triple_id"]
+        );
         graph.log(&json!({"operation":"distill_step","run":commit.key,"step":"propose_relation","index":index,"outcome":outcome,"triple_id":result["value"]["triple_id"]}))?;
         outcomes.push((index, outcome.to_owned()));
     }
     drop(graph);
     let summary = count(&outcomes);
-    step(store, commit, "propose", json!({"relations": summary}))?;
+    let skipped = outcomes
+        .iter()
+        .filter(|(_, outcome)| outcome == "relation_skipped_no_evidence")
+        .count();
+    step(
+        store,
+        commit,
+        "propose",
+        json!({"relations": summary,"relation_skipped_no_evidence":skipped}),
+    )?;
     Ok(summary)
 }
 fn count(outcomes: &[(usize, String)]) -> String {
     let n = |o: &str| outcomes.iter().filter(|(_, x)| x == o).count();
-    format!("{}+{}", n("created"), n("cited"))
+    format!(
+        "{}+{} relation_skipped_no_evidence={}",
+        n("created"),
+        n("cited"),
+        n("relation_skipped_no_evidence")
+    )
 }
 fn relation_steps(store: &Path, key: &str) -> Result<Vec<(usize, String)>, Error> {
     Ok(events(store)?

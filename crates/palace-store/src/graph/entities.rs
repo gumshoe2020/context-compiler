@@ -30,8 +30,18 @@ pub fn list(c: &Connection, args: &Value) -> Result<Value, Error> {
         ),
         _ => return Err("names must be an array of at most 1000 names".into()),
     };
-    let mut s =
-        c.prepare("SELECT id,name,type,properties,created_at FROM kg.entities ORDER BY id")?;
+    let readers: Option<Vec<String>> = args
+        .get("_readers")
+        .filter(|v| !v.is_null())
+        .map(|v| serde_json::from_value(v.clone()))
+        .transpose()?;
+    let admit = readers.as_deref().map(|r| {
+        let visible = crate::privacy::visible("triple", "t.id", r);
+        format!("EXISTS (SELECT 1 FROM kg.triples t WHERE {visible} AND (t.subject=e.id OR t.object=e.id))")
+    }).unwrap_or_else(|| "1".into());
+    let mut s = c.prepare(&format!(
+        "SELECT id,name,type,properties,created_at FROM kg.entities e WHERE {admit} ORDER BY id"
+    ))?;
     let rows = s.query_map([], entity)?.collect::<Result<Vec<_>, _>>()?;
     Ok(json!(
         rows.into_iter()

@@ -159,7 +159,8 @@ files() {
   for hook in "$SRC"/dist/common/hooks/*.sh; do
     copy_file "$hook" "$CC_HOME/hooks/$(basename "$hook")" 755
   done
-  for prompt in "$SRC"/prompts/*; do
+  for prompt in "$SRC"/prompts/*; do # files only: $CC_HOME/prompts/local is the owner's and never touched
+    [ -f "$prompt" ] || continue
     copy_file "$prompt" "$CC_HOME/prompts/$(basename "$prompt")"
   done
   [ -f "$CC_HOME/share/canaries.json" ] || write_text "$CC_HOME/share/canaries.json" '[]'

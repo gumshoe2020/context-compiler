@@ -10,14 +10,19 @@ fn facts(
     condition: &str,
     id: Option<&str>,
     timeline: bool,
+    readers: Option<&[String]>,
 ) -> Result<Vec<Value>, Error> {
     let order = if timeline {
         " ORDER BY t.valid_from ASC NULLS LAST LIMIT 100"
     } else {
         ""
     };
+    let admit = readers
+        .map(|r| crate::privacy::visible("triple", "t.id", r))
+        .unwrap_or_else(|| "1".into());
+    let conjunction = if condition.is_empty() { "WHERE" } else { "AND" };
     let sql = format!(
-        "SELECT s.name,t.predicate,o.name,t.valid_from,t.valid_to,t.confidence,t.source_closet FROM kg.triples t JOIN kg.entities s ON s.id=t.subject JOIN kg.entities o ON o.id=t.object {condition}{order}"
+        "SELECT s.name,t.predicate,o.name,t.valid_from,t.valid_to,t.confidence,t.source_closet,t.id FROM kg.triples t JOIN kg.entities s ON s.id=t.subject JOIN kg.entities o ON o.id=t.object {condition} {conjunction} {admit}{order}"
     );
     let mut s = c.prepare(&sql)?;
     let mut rows = if let Some(id) = id {
@@ -33,6 +38,28 @@ fn facts(
             row["confidence"] = json!(r.get::<_, Option<f64>>(5)?);
             row["source_closet"] = json!(r.get::<_, Option<String>>(6)?);
         }
+        if readers.is_none() {
+            let markers = crate::privacy::markers(c, "triple", &r.get::<_, String>(7)?)?;
+            let markers: Vec<_> = markers
+                .into_iter()
+                .filter(|m| m.private || !m.people.is_empty())
+                .collect();
+            if !markers.is_empty() {
+                row["privacy"] = json!(
+                    markers
+                        .iter()
+                        .map(crate::privacy::Marker::json)
+                        .collect::<Vec<_>>()
+                );
+                row["annotation"] = json!(
+                    markers
+                        .iter()
+                        .map(crate::privacy::Marker::annotation)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                );
+            }
+        }
         result.push(row);
     }
     Ok(result)
@@ -44,6 +71,11 @@ pub fn query(c: &Connection, args: &Value) -> Result<Value, Error> {
     if !["outgoing", "incoming", "both"].contains(&direction) {
         return Err("direction must be 'outgoing', 'incoming', or 'both'".into());
     }
+    let readers: Option<Vec<String>> = args
+        .get("_readers")
+        .filter(|v| !v.is_null())
+        .map(|v| serde_json::from_value(v.clone()))
+        .transpose()?;
     let mut result = Vec::new();
     for (dir, field, column) in [
         ("outgoing", "subject", "t.subject"),
@@ -57,6 +89,7 @@ pub fn query(c: &Connection, args: &Value) -> Result<Value, Error> {
             &format!("WHERE {column}=?1"),
             Some(&entity_id(&name)),
             false,
+            readers.as_deref(),
         )? {
             if as_of
                 .as_deref()
@@ -87,11 +120,16 @@ pub fn timeline(c: &Connection, args: &Value) -> Result<Value, Error> {
         .transpose()?;
     let id = name.as_deref().map(entity_id);
     let condition = if name.is_some() {
-        "WHERE t.subject=?1 OR t.object=?1"
+        "WHERE (t.subject=?1 OR t.object=?1)"
     } else {
         ""
     };
-    let rows = facts(c, condition, id.as_deref(), true)?;
+    let readers: Option<Vec<String>> = args
+        .get("_readers")
+        .filter(|v| !v.is_null())
+        .map(|v| serde_json::from_value(v.clone()))
+        .transpose()?;
+    let rows = facts(c, condition, id.as_deref(), true, readers.as_deref())?;
     Ok(json!({"entity":name.as_deref().unwrap_or("all"),"count":rows.len(),"timeline":rows}))
 }
 pub fn stats(c: &Connection) -> Result<Value, Error> {
@@ -101,6 +139,33 @@ pub fn stats(c: &Connection) -> Result<Value, Error> {
     let current = count("SELECT count(*) FROM kg.triples WHERE valid_to IS NULL")?;
     let mut s = c.prepare("SELECT DISTINCT predicate FROM kg.triples ORDER BY predicate")?;
     let types = s
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(
+        json!({"entities":entities,"triples":triples,"current_facts":current,"expired_facts":triples-current,"relationship_types":types}),
+    )
+}
+
+/// All aggregates use the same edge scope as query and traversal.
+pub fn scoped_stats(c: &Connection, readers: Option<&[String]>) -> Result<Value, Error> {
+    let Some(readers) = readers else {
+        return stats(c);
+    };
+    let admitted = crate::privacy::visible("triple", "t.id", readers);
+    let count = |condition: &str| -> Result<i64, Error> {
+        Ok(c.query_row(
+            &format!("SELECT count(*) FROM kg.triples t WHERE {admitted} {condition}"),
+            [],
+            |r| r.get(0),
+        )?)
+    };
+    let triples = count("")?;
+    let current = count("AND valid_to IS NULL")?;
+    let entities: i64 = c.query_row(&format!("SELECT count(*) FROM kg.entities e WHERE EXISTS (SELECT 1 FROM kg.triples t WHERE {admitted} AND (t.subject=e.id OR t.object=e.id))"), [], |r| r.get(0))?;
+    let types = c
+        .prepare(&format!(
+            "SELECT DISTINCT predicate FROM kg.triples t WHERE {admitted} ORDER BY predicate"
+        ))?
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(

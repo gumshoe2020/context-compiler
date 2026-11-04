@@ -1,0 +1,77 @@
+{
+  "1-4": {
+    "actions": [
+      {
+        "action": "create",
+        "id": "send-harbor-map",
+        "owner": "person",
+        "kind": "task",
+        "title": "Send the harbor map",
+        "due": null,
+        "line": 3,
+        "quote": "I'll send the harbor map."
+      },
+      {
+        "action": "create",
+        "id": "invented-evidence",
+        "owner": "assistant",
+        "kind": "question",
+        "title": "Fabricated item",
+        "line": 3,
+        "quote": "I agreed to buy a silver telescope."
+      },
+      {
+        "action": "create",
+        "id": "worry-check-in",
+        "owner": "assistant",
+        "kind": "pastoral",
+        "title": "Check in about the worry",
+        "due": "2031-04-02",
+        "line": 4,
+        "quote": "Please check in about my worry tomorrow."
+      }
+    ]
+  },
+  "5-6": {
+    "actions": [
+      {
+        "action": "update",
+        "id": "send-harbor-map",
+        "title": "Send the harbor chart",
+        "line": 5,
+        "quote": "The harbor chart still needs sending."
+      },
+      {
+        "action": "close",
+        "id": "send-harbor-map",
+        "status": "done",
+        "line": 6,
+        "close_quote": "Okay sent."
+      }
+    ]
+  },
+  "7-7": {
+    "actions": [
+      {
+        "action": "create",
+        "id": "reserve-lantern-room",
+        "owner": "person",
+        "kind": "task",
+        "title": "Reserve the lantern room",
+        "due": "2031-04-02",
+        "line": 7,
+        "quote": "I'll reserve the lantern room before 2031-04-02."
+      }
+    ]
+  },
+  "8-8": {
+    "actions": [
+      {
+        "action": "expire",
+        "id": "reserve-lantern-room",
+        "line": 8,
+        "close_quote": "The lantern meeting date has passed."
+      }
+    ]
+  }
+}

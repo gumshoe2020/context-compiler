@@ -11,6 +11,16 @@ use palace_mempalace::Evidence;
 use palace_store::Error;
 use serde_json::Value;
 
+/// An empty writer input is a quiet refusal, never an invalid model attempt.
+#[derive(Debug)]
+pub(crate) struct EmptyCluster;
+impl std::fmt::Display for EmptyCluster {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("empty writer cluster; no rollup due")
+    }
+}
+impl std::error::Error for EmptyCluster {}
+
 /// One attempt: the body it validated, the validation and its report, how it was made.
 pub(crate) struct Attempt {
     pub body: String,
@@ -29,6 +39,9 @@ pub(crate) struct Job<'a> {
 impl Run {
     /// Every attempt in order; the last one passed, or failed with no attempt left.
     pub(crate) fn write_validated(&self, job: &Job) -> Result<Vec<Attempt>, Error> {
+        if job.cluster.members.is_empty() {
+            return Err(Box::new(EmptyCluster));
+        }
         let (mut attempts, mut mode) = (Vec::<Attempt>::new(), Mode::Write);
         loop {
             let attempt = self.attempt(job, mode, attempts.last())?;
@@ -66,7 +79,7 @@ impl Run {
             let body = crate::rollup::normalise(&self.models.write.complete(&prompt)?);
             let (body, mends) = rollup_repair::mend_layout(&body, &self.diary_names()?);
             for mend in mends {
-                eprintln!("rollup: layout mended: {mend}");
+                privacy_log!("rollup: layout mended: {mend}");
             }
             return self.validated(job, body, mode, 0);
         };
@@ -125,7 +138,7 @@ impl Run {
             return Ok(());
         }
         for mend in &mends {
-            eprintln!("rollup: cited value mended: line {} {}", mend.line, mend.id);
+            privacy_log!("rollup: cited value mended: line {} {}", mend.line, mend.id);
         }
         (attempt.validation, attempt.report) =
             self.validate(&body, job.target, job.cluster, job.evidence)?;
@@ -169,7 +182,7 @@ fn refused_attempt(previous: &Attempt, refusals: Vec<String>) -> Attempt {
 
 fn report_attempt(number: usize, attempt: &Attempt) {
     let v = &attempt.validation;
-    eprintln!(
+    privacy_log!(
         "rollup: validate attempt={number} {} claims={} relations={} mode={} repaired={}",
         if v.passed() { "pass" } else { "fail" },
         v.claims.len(),

@@ -307,7 +307,7 @@ pub fn record_entry_at(root: &Path, compiler: &Path, applied: &Applied) -> Resul
 }
 
 fn entry_in(root: &Path, compiler: &Path, applied: &Applied) -> Result<Entry, Error> {
-    let file = write_entry(root, applied)?;
+    let file = write_entry(root, compiler, applied)?;
     ClaimStore::open(compiler)?.log(&json!({"operation":"improve_entry","event":applied.event,"file":file.name,"iso":diary_file::iso_millis(file.at),"title":file.title,"text_sha256":palace_core::ids::sha256(file.text.as_bytes())}))?;
     Ok(file)
 }
@@ -394,8 +394,14 @@ fn gate(ctx: &Ctx, graph: &mut Graph, p: &Prepared) -> Result<Vec<String>, Error
     let mut created = Vec::new();
     for proposal in &p.proposals {
         let now = graph.now()?;
-        let value =
-            propose_relation(&evidence, graph, proposal, &now, "palace-improve")?["value"].take();
+        let mut result = propose_relation(&evidence, graph, proposal, &now, "palace-improve")?;
+        if result["ok"] != true {
+            if let Some(reason) = evidence.searcher.unavailable() {
+                return Err(Unavailable::error(reason));
+            }
+            return Err(Refused::error("relation_skipped_no_evidence"));
+        }
+        let value = result["value"].take();
         if value["created"] == true {
             created.push(
                 value["triple_id"]
@@ -458,13 +464,25 @@ struct Entry {
 
 /// The IMPROVE entry (M4b recipe): title `IMPROVE: <verb> <date> C7 — <thread>`, tags
 /// `claim-improvement`, the thread, and `no-compress` iff `--by <person>`. Never overwrites.
-fn write_entry(root: &Path, a: &Applied) -> Result<Entry, Error> {
+fn write_entry(root: &Path, compiler: &Path, a: &Applied) -> Result<Entry, Error> {
     let thread = a.listed["thread"].as_str().unwrap_or("unknown");
     let title = format!("IMPROVE: {} {} — {thread}", a.verb, label(&a.listed));
     let text = entry_text(a, &thread_tag(thread));
     let at = crate::rollup::now_millis()?;
     let file = diary_file::render(at, &title, &text);
     let path = crate::paths::database(&root.join("diary").join(&file.name))?;
+    let mut store = ClaimStore::open(compiler)?;
+    let mut inputs = Vec::new();
+    for id in a.from_claim.iter().chain(a.to_claim.iter()) {
+        inputs.extend(store.privacy_markers("claim", id)?);
+    }
+    let marker = if inputs.is_empty() {
+        store.privacy_source("")?
+    } else {
+        palace_store::privacy::Marker::meet(&inputs, &a.event)
+    };
+    store.mark_entry(&file.name, &marker)?;
+    drop(store);
     fs::OpenOptions::new()
         .write(true)
         .create_new(true)

@@ -26,6 +26,7 @@ pub struct Diary {
     root: PathBuf,
     reads: Cell<usize>,
     fallbacks: Cell<usize>,
+    allowed: Option<std::collections::BTreeSet<String>>,
 }
 impl Diary {
     pub fn open(root: &Path) -> Result<Self, Error> {
@@ -39,7 +40,21 @@ impl Diary {
             root,
             reads: Cell::new(0),
             fallbacks: Cell::new(0),
+            allowed: None,
         })
+    }
+    pub fn admit_only(&mut self, names: std::collections::BTreeSet<String>) {
+        self.allowed = Some(names);
+    }
+    pub fn admits(&self, name: &str) -> bool {
+        let name = Path::new(name)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(name);
+        let name = name.strip_suffix(".md").unwrap_or(name);
+        self.allowed
+            .as_ref()
+            .is_none_or(|names| names.contains(name))
     }
     pub fn header_counts(&self) -> (usize, usize) {
         (self.reads.get(), self.fallbacks.get())
@@ -71,6 +86,9 @@ impl Diary {
 }
 impl Diary {
     fn read_header_inner(&self, source_path: &str) -> Result<String, Error> {
+        if !self.admits(source_path) {
+            return Err("entry not admitted".into());
+        }
         let path = self.confined(source_path)?;
         let mut bytes = Vec::new();
         File::open(path)?.take(3200).read_to_end(&mut bytes)?;
@@ -93,6 +111,7 @@ impl DiaryReader for Diary {
                 .file_name()
                 .to_str()
                 .and_then(|s| s.strip_suffix(".md"))
+                && self.admits(name)
             {
                 names.push(name.to_owned());
             }
@@ -101,6 +120,9 @@ impl DiaryReader for Diary {
         Ok(names)
     }
     fn read(&self, name: &str) -> Result<Option<String>, Error> {
+        if !self.admits(name) {
+            return Ok(None);
+        }
         if name.is_empty() || name.contains(['/', '\\']) || name == "." || name == ".." {
             return Err("diary filename must be a basename".into());
         }

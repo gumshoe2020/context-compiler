@@ -106,10 +106,16 @@ pub struct Options {
 }
 
 pub fn run(options: Options) -> i32 {
+    let compiler = options
+        .kg
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("compiler.sqlite");
+    crate::privacy::sensitive(crate::privacy::has_private(&compiler));
     match measure(&options) {
         Ok(()) => 0,
         Err(error) => {
-            eprintln!("palace fidelity: {error}");
+            privacy_log!("palace fidelity: {error}");
             2
         }
     }
@@ -138,7 +144,7 @@ fn measure(options: &Options) -> Result<(), Error> {
             &store,
             &diary,
             &name_of(&name),
-            options,
+            options.sample,
             &judge,
         )?);
     }
@@ -148,7 +154,13 @@ fn measure(options: &Options) -> Result<(), Error> {
                 .read(&name)?
                 .is_some_and(|t| Entry::parse(&name, t).is_rollup);
             if is_rollup && !store.fidelity_scored("consolidation", &format!("{name}.md"))? {
-                checks.extend(consolidation(&store, &diary, &name, options, &judge)?);
+                checks.extend(consolidation(
+                    &store,
+                    &diary,
+                    &name,
+                    options.sample,
+                    &judge,
+                )?);
             }
         }
     }
@@ -164,11 +176,26 @@ fn measure(options: &Options) -> Result<(), Error> {
             continue;
         }
         recorded += 1;
-        println!("{}", check.line(&judge));
+        let private = store.privacy_source(&check.file)?.private;
+        if private {
+            println!(
+                "FIDELITY private id={}",
+                palace_core::ids::sha256(check.file.as_bytes())
+            );
+        } else {
+            println!("{}", check.line(&judge));
+        }
         if let Some(reason) = check.page(options.floor) {
             page(
                 options,
-                &format!("FIDELITY PAGE {} {}: {reason}", check.point, check.file),
+                &if private {
+                    format!(
+                        "FIDELITY PAGE private id={}",
+                        palace_core::ids::sha256(check.file.as_bytes())
+                    )
+                } else {
+                    format!("FIDELITY PAGE {} {}: {reason}", check.point, check.file)
+                },
             )?;
         }
     }
@@ -310,7 +337,7 @@ fn consolidation(
     store: &ClaimStore,
     diary: &Diary,
     name: &str,
-    options: &Options,
+    sample: usize,
     judge: &Judge,
 ) -> Result<Vec<Check>, Error> {
     let text = diary
@@ -350,7 +377,7 @@ fn consolidation(
         .filter(|c| c["status"] == "live")
         .collect();
     let mut check = Check::new("consolidation", &file, "concept");
-    for c in recall::sample(&file, &concepts, |c| text_of(c, "id"), options.sample) {
+    for c in recall::sample(&file, &concepts, |c| text_of(c, "id"), sample) {
         let statement = statement(&c);
         let verdict = judge.ask(&text_of(&c, "id"), &statement, &entry.text)?;
         check.add(json!({"id": c["id"], "statement": statement}), verdict);
@@ -738,6 +765,26 @@ fn page(options: &Options, line: &str) -> Result<(), Error> {
         Ok(status) if status.success() => {}
         Ok(status) => eprintln!("palace fidelity: --page {} exited {status}", exe.display()),
         Err(e) => eprintln!("palace fidelity: --page {}: {e}", exe.display()),
+    }
+    Ok(())
+}
+
+/// Record the existing consolidation measure, with concepts explicitly unjudged.
+/// Automatic rollups do not assume an additional model or broaden the audience.
+pub(crate) fn record_rollup(
+    inputs: &crate::rollup_commit::Inputs,
+    file: &str,
+) -> Result<(), Error> {
+    let path = crate::rollup_commit::compiler_path(inputs.kg)?;
+    let mut diary = Diary::open(&inputs.root.join("diary"))?;
+    crate::privacy::filter_audience_diary(&mut diary, &path, inputs.audience)?;
+    let mut store = ClaimStore::open(&path)?;
+    let judge = Judge::none();
+    let name = file.strip_suffix(".md").unwrap_or(file);
+    let checks = consolidation(&store, &diary, name, recall::SAMPLE, &judge)?;
+    let at = store.now()?;
+    for check in checks {
+        store.record_fidelity(&check.row(&judge), &at)?;
     }
     Ok(())
 }

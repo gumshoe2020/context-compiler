@@ -73,7 +73,7 @@ fn hits(node: &Node, tokens: &BTreeSet<String>, raw: &BTreeSet<String>) -> usize
 }
 
 /// Lowercased runs of ASCII letters and digits (every other character separates).
-fn words(text: &str) -> impl Iterator<Item = String> + '_ {
+pub fn words(text: &str) -> impl Iterator<Item = String> + '_ {
     let lower = text.to_lowercase();
     lower
         .split(|c: char| !c.is_ascii_alphanumeric())

@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 use std::{path::Path, time::Duration};
 pub struct ClaimStore {
     pub(crate) store: Store,
+    pub(crate) item_inputs: Option<crate::privacy::Marker>,
 }
 /// One rollup's claims and the watch rows produced for them (claim rows and malformed rows).
 pub struct Checked<'a> {
@@ -61,6 +62,7 @@ impl ClaimStore {
     pub fn open(path: &Path) -> Result<Self, Error> {
         Ok(Self {
             store: Store::open_with_wait(path, Duration::from_secs(5))?,
+            item_inputs: None,
         })
     }
     pub fn now(&self) -> Result<String, Error> {
@@ -70,6 +72,11 @@ impl ClaimStore {
     /// every run so far (survived checks and findings summed over history).
     pub fn record(&mut self, checked: Checked, at: &str) -> Result<usize, Error> {
         let tx = self.store.connection.transaction()?;
+        // An explicit ingestion is a write path too; authenticate or quarantine its entry.
+        if crate::privacy::markers(&tx, "entry", checked.rollup)?.is_empty() {
+            let marker = crate::privacy::origin(&tx, checked.rollup)?;
+            crate::privacy::put(&tx, "entry", checked.rollup, &marker)?;
+        }
         let meta = Meta {
             rollup: checked.rollup,
             date: checked.date,
@@ -137,6 +144,7 @@ impl ClaimStore {
                 "INSERT OR IGNORE INTO claims(id,number,rollup,subject,predicate,object,date,source,quote,confidence_base,first_seen,kind,transcript) VALUES (?1,?2,?3,?4,?5,?6,?7,?3,?8,0.60,?9,?10,?11)",
                 params![c.id, c.number, entry.file, c.subject, c.predicate, c.object, c.date, c.quote, at, c.kind, c.transcript],
             )?;
+            crate::privacy::inherit(&tx, "claim", c.id, "entry", entry.file)?;
             tx.execute(
                 "INSERT OR IGNORE INTO claim_numbers(rollup,number,claim_id,date,thread) VALUES (?1,?2,?3,?4,?5)",
                 params![entry.file, c.number, c.id, entry.date, entry.thread],
@@ -183,6 +191,9 @@ impl ClaimStore {
     /// Appends one audited event (e.g. a rollup commit) to the hash-chained write log.
     pub fn log(&mut self, payload: &Value) -> Result<(), Error> {
         let tx = self.store.connection.transaction()?;
+        if payload["operation"] == "distill_commit" {
+            crate::privacy::distill_event(&tx, payload)?;
+        }
         write_log::append(&tx, &payload.to_string())?;
         tx.commit()?;
         Ok(())
@@ -210,6 +221,16 @@ impl ClaimStore {
             params![triple_id, claim_id, rollup, at],
         )? == 1;
         if added {
+            let mut markers = crate::privacy::markers(&tx, "entry", rollup)?;
+            if markers.is_empty() {
+                markers = crate::privacy::markers(&tx, "claim", claim_id)?;
+            }
+            if markers.is_empty() {
+                crate::privacy::inherit(&tx, "triple", triple_id, "entry", rollup)?;
+            } else {
+                let marker = crate::privacy::Marker::meet(&markers, rollup);
+                crate::privacy::put(&tx, "triple", triple_id, &marker)?;
+            }
             write_log::append(
                 &tx,
                 &json!({"operation":"citation","triple_id":triple_id,"claim_id":claim_id,"rollup":rollup,"cited_at":at})
@@ -300,6 +321,12 @@ impl ClaimStore {
     pub fn claim(&self, id: &str) -> Result<Option<Value>, Error> {
         crate::lookup::claim(&self.store.connection, id)
     }
+    pub fn public_findings(
+        &self,
+        filter: &crate::lookup::FindingFilter,
+    ) -> Result<Vec<Value>, Error> {
+        crate::lookup::public_findings(&self.store.connection, filter)
+    }
     pub fn findings(&self, filter: &crate::lookup::FindingFilter) -> Result<Vec<Value>, Error> {
         crate::lookup::findings(&self.store.connection, filter)
     }
@@ -331,6 +358,18 @@ fn replace_specifics(tx: &Transaction, new: &Distilled, at: &str) -> Result<(), 
         normalise_predicate(new.predicate),
     );
     for (old, s, p, object, date) in live {
+        let old_markers = crate::privacy::markers(tx, "claim", &old)?;
+        let new_markers = crate::privacy::markers(tx, "claim", new.id)?;
+        let audiences = |ms: &[crate::privacy::Marker]| {
+            ms.iter()
+                .filter(|m| m.private)
+                .map(|m| (m.audience.clone(), m.quarantine))
+                .collect::<Vec<_>>()
+        };
+        if audiences(&old_markers) != audiences(&new_markers) {
+            continue;
+        }
+
         let same = normalise_entity(&s) == subject && normalise_predicate(&p) == predicate;
         if !same || object.trim() == new.object.trim() || date.as_str() > new.date {
             continue;
@@ -384,6 +423,29 @@ fn record_row(
     let Some(claim) = claims.iter().find(|c| row["claim"] == c.number.as_str()) else {
         return Ok(0);
     };
+    let inputs = crate::privacy::markers(tx, "entry", meta.rollup)?;
+    let input = crate::privacy::Marker::meet(&inputs, meta.rollup);
+    let existing = crate::privacy::markers(tx, "claim", &claim.id)?;
+    let narrows = !inputs.is_empty()
+        && input.private
+        && existing.iter().any(|m| {
+            !m.private
+                || !m.audience.is_subset(&input.audience)
+                || (input.quarantine && m.source != input.source)
+        });
+    if narrows {
+        // A private re-observation is an independent support, not a global confidence/status
+        // update or a finding on the wider original. Keep its private rollup membership.
+        crate::privacy::inherit(tx, "claim", &claim.id, "entry", meta.rollup)?;
+        tx.execute("INSERT OR IGNORE INTO claim_numbers(rollup,number,claim_id,date,thread) VALUES (?1,?2,?3,?4,?5)",params![meta.rollup,claim.number,claim.id,meta.date,meta.thread])?;
+        row["confidence"] = json!(derived(tx, &claim.id)?);
+        row["confidence_runs"] = json!(tx.query_row(
+            "SELECT checks FROM claims WHERE id=?1",
+            [&claim.id],
+            |r| r.get::<_, i64>(0)
+        )?);
+        return Ok(0);
+    }
     let found = record_claim_finding(tx, meta, claim, row, at)?;
     record_claim(tx, meta, claim, row, at)?;
     Ok(usize::from(found))
@@ -604,6 +666,7 @@ fn upsert_claim(
         "INSERT OR IGNORE INTO claims(id,number,rollup,subject,predicate,object,date,source,quote,superseded_by,confidence_base,first_seen) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
         params![c.id, c.number, rollup, c.subject, c.predicate, c.object, c.date, c.source, c.quote, c.superseded_by, base, at],
     )?;
+    crate::privacy::inherit(tx, "claim", &c.id, "entry", rollup)?;
     Ok(())
 }
 fn finding_id(subject: &str, kind: &str, at: &str) -> String {

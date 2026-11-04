@@ -31,6 +31,7 @@ pub mod fidelity;
 pub mod gate_checks;
 pub mod graph_order;
 pub mod improve;
+pub mod items;
 pub mod names;
 pub mod pairing;
 pub mod quote_relevance;

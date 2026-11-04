@@ -1,0 +1,29 @@
+{
+  "name": "mempalace-memory",
+  "version": "0.3.0",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "tools.js",
+    "provider.js",
+    "backend.js",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "description": "Marker-aware MemPalace memory search",
+  "scripts": {
+    "test": "node --test"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ],
+    "install": {
+      "minHostVersion": ">=2026.10.7"
+    },
+    "compat": {
+      "pluginApi": ">=2026.10.7"
+    }
+  }
+}

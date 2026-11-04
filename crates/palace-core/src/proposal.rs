@@ -23,4 +23,8 @@ pub struct Proposal {
     /// SETTLE-1b: the `<palace copy>:<line>` locator of a distilled relation, kept in provenance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript: Option<String>,
+    /// The names the evidence entry must mention when the edge ends are graph nodes no diary text
+    /// can name (improve's `claim <id>` fact nodes). Set by code only: never read from a batch.
+    #[serde(skip)]
+    pub evidence_names: Option<[String; 2]>,
 }

@@ -42,6 +42,7 @@ pub struct Ask {
 
 pub struct Reader {
     c: Connection,
+    readers: Vec<String>,
 }
 
 impl Reader {
@@ -60,16 +61,66 @@ impl Reader {
             "ATTACH DATABASE ?1 AS kg",
             [format!("file:{}?mode=ro", uri(kg)?)],
         )?;
-        Ok(Self { c })
+        Ok(Self {
+            c,
+            readers: Vec::new(),
+        })
+    }
+
+    pub fn with_readers(mut self, readers: Vec<String>) -> Self {
+        self.readers = readers;
+        self
+    }
+    fn admit(&self, kind: &str, id_sql: &str) -> Result<String, Error> {
+        Ok(if self.has_table("privacy_markers")? {
+            crate::privacy::visible_in(
+                kind,
+                id_sql,
+                &self.readers,
+                crate::privacy::conversation_id().as_deref(),
+            )
+        } else {
+            "0".into()
+        })
+    }
+    pub fn entry_visible(&self, entry: &str) -> Result<bool, Error> {
+        if !self.has_table("privacy_markers")? {
+            return Ok(false);
+        }
+        Ok(self.c.query_row(
+            &format!("SELECT {}", self.admit("entry", "?1")?),
+            [entry],
+            |r| r.get(0),
+        )?)
+    }
+    pub fn marked_entries(&self) -> Result<Option<Vec<String>>, Error> {
+        if !self.has_table("privacy_markers")? {
+            return Ok(Some(Vec::new()));
+        }
+        if !self
+            .c
+            .prepare("SELECT 1 FROM privacy_markers WHERE kind='entry'")?
+            .exists([])?
+        {
+            return Ok(Some(Vec::new()));
+        }
+        let mut s = self.c.prepare(&format!(
+            "SELECT DISTINCT id FROM privacy_markers WHERE kind='entry' AND {} ORDER BY id",
+            self.admit("entry", "privacy_markers.id")?
+        ))?;
+        Ok(Some(
+            s.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?,
+        ))
     }
 
     /// Every node at an end of a live triple, ids ascending (the hook's order), with its aliases.
     pub fn nodes(&self) -> Result<Vec<Node>, Error> {
-        let mut s = self.c.prepare(
+        let admitted = self.admit("triple", "t.id")?;
+        let mut s = self.c.prepare(&format!(
             "SELECT e.id, CASE WHEN json_valid(e.properties) THEN json_extract(e.properties,'$.aliases') END
-             FROM kg.entities e WHERE e.id IN (SELECT subject FROM kg.triples WHERE valid_to IS NULL
-             UNION SELECT object FROM kg.triples WHERE valid_to IS NULL) ORDER BY e.id",
-        )?;
+             FROM kg.entities e WHERE e.id IN (SELECT subject FROM kg.triples t WHERE valid_to IS NULL AND {admitted}
+             UNION SELECT object FROM kg.triples t WHERE valid_to IS NULL AND {admitted}) ORDER BY e.id"
+        ))?;
         let rows = s.query_map([], |r| {
             Ok(Node {
                 id: r.get(0)?,
@@ -102,13 +153,14 @@ impl Reader {
             .map(|i| format!("?{i}"))
             .collect::<Vec<_>>()
             .join(",");
+        let admitted = self.admit("triple", "t.id")?;
         let sql = format!(
             "SELECT t.id, s.name, t.predicate, o.name,
                     CASE WHEN json_valid(t.source_closet) THEN json_extract(t.source_closet,'$.confidence') END AS c,
                     CASE WHEN json_valid(t.source_closet) THEN json_extract(t.source_closet,'$.claim_id') END,
                     count(*) OVER ()
              FROM kg.triples t JOIN kg.entities s ON t.subject=s.id JOIN kg.entities o ON t.object=o.id
-             WHERE t.valid_to IS NULL AND (t.subject IN ({list}) OR t.object IN ({list}))
+             WHERE t.valid_to IS NULL AND {admitted} AND (t.subject IN ({list}) OR t.object IN ({list}))
              ORDER BY c DESC, t.extracted_at DESC LIMIT {max}"
         );
         let mut s = self.c.prepare(&sql)?;
@@ -147,7 +199,10 @@ impl Reader {
         if let Some(id) = created_by {
             let known = self
                 .c
-                .prepare("SELECT 1 FROM claims WHERE id=?1")?
+                .prepare(&format!(
+                    "SELECT 1 FROM claims WHERE id=?1 AND {}",
+                    self.admit("claim", "claims.id")?
+                ))?
                 .exists([id])?;
             if known {
                 return Ok(Some(id.to_owned()));
@@ -156,8 +211,8 @@ impl Reader {
         Ok(self
             .c
             .query_row(
-                "SELECT claim_id FROM citations WHERE triple_id=?1 AND withdrawn_at IS NULL AND claim_id IN (SELECT id FROM claims)
-                 ORDER BY cited_at DESC, claim_id LIMIT 1",
+                &format!("SELECT claim_id FROM citations WHERE triple_id=?1 AND withdrawn_at IS NULL AND {} AND claim_id IN (SELECT id FROM claims WHERE {})
+                 ORDER BY cited_at DESC, claim_id LIMIT 1", self.admit("entry","citations.rollup")?,self.admit("claim","claims.id")?),
                 [triple],
                 |r| r.get(0),
             )
@@ -173,7 +228,7 @@ impl Reader {
         let handle = self
             .c
             .query_row(
-                "SELECT date || ' ' || number FROM claim_numbers WHERE claim_id=?1 ORDER BY date DESC, rollup DESC LIMIT 1",
+                &format!("SELECT date || ' ' || number FROM claim_numbers WHERE claim_id=?1 AND {} ORDER BY date DESC, rollup DESC LIMIT 1",self.admit("entry","claim_numbers.rollup")?),
                 [id],
                 |r| r.get(0),
             )
@@ -213,11 +268,16 @@ impl Reader {
 
     /// Every open ask (unanswered, its finding undecided) with its claim's subject and object.
     fn asks(&self) -> Result<Vec<(Ask, Ends)>, Error> {
-        let mut s = self.c.prepare(
+        let admitted = format!(
+            "{} AND {}",
+            self.admit("claim", "c.id")?,
+            self.admit("ask", "a.finding")?
+        );
+        let mut s = self.c.prepare(&format!(
             "SELECT a.finding, a.claim, a.token, a.line, c.subject, c.object FROM asks a JOIN claims c ON c.id=a.claim
-             WHERE a.answered_at IS NULL AND NOT EXISTS (SELECT 1 FROM findings f WHERE f.id=a.finding AND f.decision IS NOT NULL)
-             ORDER BY a.asked_at, a.finding",
-        )?;
+             WHERE a.answered_at IS NULL AND {admitted} AND NOT EXISTS (SELECT 1 FROM findings f WHERE f.id=a.finding AND f.decision IS NOT NULL)
+             ORDER BY a.asked_at, a.finding"
+        ))?;
         let rows = s.query_map([], |r| {
             let ask = Ask {
                 finding: r.get(0)?,
@@ -238,10 +298,11 @@ impl Reader {
             return Ok(Vec::new());
         }
         let wings = self.entry_wings()?;
-        let mut s = self.c.prepare(
+        let admitted = self.admit("claim", "claims.id")?;
+        let mut s = self.c.prepare(&format!(
             "SELECT id,subject,predicate,object,date,COALESCE(quote,''),rollup FROM claims
-             WHERE kind='specific' AND status='live' ORDER BY date DESC, first_seen DESC, rowid DESC",
-        )?;
+             WHERE kind='specific' AND status='live' AND {admitted} ORDER BY date DESC, first_seen DESC, rowid DESC"
+        ))?;
         let rows = s.query_map([], |r| {
             Ok(SpecificRow {
                 id: r.get(0)?,
@@ -266,9 +327,10 @@ impl Reader {
     pub fn entry_subjects(
         &self,
     ) -> Result<std::collections::HashMap<String, std::collections::BTreeSet<String>>, Error> {
-        let mut s = self
-            .c
-            .prepare("SELECT rollup, lower(subject) FROM claims WHERE status='live'")?;
+        let mut s = self.c.prepare(&format!(
+            "SELECT rollup, lower(subject) FROM claims WHERE status='live' AND {}",
+            self.admit("claim", "claims.id")?
+        ))?;
         let rows = s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         let mut subjects: std::collections::HashMap<String, std::collections::BTreeSet<String>> =
             std::collections::HashMap::new();

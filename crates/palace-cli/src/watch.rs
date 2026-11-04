@@ -130,8 +130,12 @@ where
 }
 pub fn run(options: Options) -> Result<i32, Error> {
     let diary_root = crate::paths::input(&options.diary)?;
-    let diary = Diary::open(&diary_root)?;
-    let entries = selected_entries(&options, &diary_root)?;
+    let mut diary = Diary::open(&diary_root)?;
+    if let Some(store) = &options.store {
+        crate::privacy::filter_diary(&mut diary, store, &crate::privacy::current_readers())?;
+    }
+    let mut entries = selected_entries(&options, &diary_root)?;
+    entries.retain(|e| diary.admits(&e.name));
     let canaries = canaries(&options)?;
     let judge = judge(&options)?;
     let overlay = Overlay {

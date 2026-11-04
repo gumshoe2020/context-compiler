@@ -1,4 +1,4 @@
-<!-- prompts/distill.md — the distill policy (SETTLE-1b, dev/SPEC-event-driven-settle.md §3, §4). palace distill fills in the person's and the assistant's names (--person/--assistant) and appends the conversation's new text, one line per message as `L<line> [user|assistant] <text>`, then (SETTLE-1d §5) the block `VALUES IN THIS CONVERSATION (line: values)`: the numbers, dates and names each line carries, as recall::values reads them (at most 60 lines, earliest first; no block when there are none). The command checks the answer; it does the writing, mining and graph wiring itself. Skip rule: palace distill never sends a conversation with fewer than DISTILL_MIN_TURNS exchanges (default 3); it records the position and files nothing. -->
+<!-- prompts/distill.md — the distill policy (SETTLE-1b, dev/SPEC-event-driven-settle.md §3, §4). palace distill fills in the person's and the assistant's names (--person/--assistant), renders the audience table (placeholder below) from the people map's audience-* categories, appends `<prompts>/local/distill.md` under its own heading when it exists, and appends the conversation's new text, one line per message as `L<line> [user|assistant] <text>`, then (SETTLE-1d §5) the block `VALUES IN THIS CONVERSATION (line: values)`: the numbers, dates and names each line carries, as recall::values reads them (at most 60 lines, earliest first; no block when there are none). The command checks the answer; it does the writing, mining and graph wiring itself. Skip rule: palace distill never sends a conversation with fewer than DISTILL_MIN_TURNS exchanges (default 3); it records the position and files nothing. -->
 
 Memory distillation. Below is the new part of one conversation between {Person} and {Assistant}. Decide what of it is worth remembering long-term, and file it as diary entries, typed claims and graph relations. You have no tools: answer with ONE JSON object and nothing else.
 
@@ -7,6 +7,20 @@ File only what is worth remembering long-term: decisions made, new facts about p
 
 ENTRIES
 One entry per distinct thread of the conversation, usually one. Each entry: a short title naming the thread; a body of a few plain sentences in the third person, stating what happened and what it means (who decided what, what changed, what is still open); tags: two to five short lowercase words naming the people, the project and the thread (no commas or full stops inside a tag). Never invent anything the conversation does not say.
+
+AUDIENCE TAGS
+Add at most ONE audience-* tag per entry, in addition to ordinary thread tags, and only a tag from the table below. If the table has no audience-* tag, add none.
+Shared entries carry no audience tag (never a tag named shared).
+Keep tag metadata in the tags list only; do not put Tags: fields in the body.
+
+The main subject decides. Low-sensitivity asides (tiredness, schedule, session id, mention of a
+private wing) do not narrow an entry that is otherwise general. Sensitive asides still narrow:
+the health, money, relationships or confidences of the people a tag names. Choose the narrower
+audience (fewer people) when multiple tags apply. For uncertainty, pick the most likely tag from
+the content, not the tag with the fewest people. General reflection, work, technology and research
+are shared. Preserve existing private tags and restrictions; classify content, not its storage wing.
+
+{AUDIENCE_TABLE}
 
 CLAIMS — TWO KINDS
 Each claim is one load-bearing fact, with subject, predicate (active voice), object, the date it is true from (YYYY-MM-DD), a verbatim quote copied exactly from the conversation (no more than 20 words), and the line number L<n> the quote is on.

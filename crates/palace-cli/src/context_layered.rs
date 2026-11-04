@@ -38,7 +38,7 @@ const NEWER_PER_THREAD: usize = 3;
 const MAX_NEWER: usize = 5;
 
 pub fn produce(o: &Options, message: &str, deadline: Instant) -> Result<String, Error> {
-    let private = o.wing.is_some();
+    let private = o.wing.is_some() && context::readers(o).is_empty();
     let pulled = match private {
         true => empty_pull(),
         false => context::pull(o, message)?,
@@ -46,13 +46,14 @@ pub fn produce(o: &Options, message: &str, deadline: Instant) -> Result<String, 
     let reader = Reader::open(
         &crate::paths::input(&o.store)?,
         &crate::paths::input(&o.kg)?,
-    )?;
+    )?
+    .with_readers(context::readers(o));
     let specifics = specifics(o, &reader, message)?;
     if Instant::now() >= deadline {
         return Err(format!("no graph within {} ms", o.timeout_ms).into());
     }
     let hits = context::excerpts(o, message, deadline);
-    let (threads, newer) = threads(&hits, &reader.entry_subjects()?);
+    let (threads, newer) = threads(&hits, &reader.entry_subjects()?, &reader);
     let layered = Layered {
         specifics: specifics.iter().map(shown).collect(),
         graph: Graph {
@@ -135,11 +136,11 @@ fn shown(s: &SpecificRow) -> Specific {
 /// thread adds the thread's rollup to block 3 (at most two threads) and the thread's newer
 /// entries (at most three) to block 4; a hit without one is itself a block-4 item. Block 4 keeps
 /// the hits' rank order, each source once, at most five items.
-fn threads(hits: &[SearchHit], subjects: &Subjects) -> (Vec<Thread>, Vec<Newer>) {
+fn threads(hits: &[SearchHit], subjects: &Subjects, reader: &Reader) -> (Vec<Thread>, Vec<Newer>) {
     let mut diaries = Diaries::default();
     let (mut threads, mut newer) = (Vec::<Thread>::new(), Vec::<Newer>::new());
     for hit in hits.iter().take(SHOWN_EXCERPTS) {
-        let items = match diaries.thread(hit, subjects) {
+        let items = match diaries.thread(hit, subjects, reader) {
             Some((thread, _)) if threads.iter().any(|t| t.source == thread.source) => continue,
             Some((_, _)) if threads.len() == MAX_THREADS => continue,
             Some((thread, items)) => {
@@ -166,12 +167,17 @@ struct Diaries(HashMap<PathBuf, Option<ThreadDiary>>);
 
 impl Diaries {
     /// The hit's thread and its newer entries, when the hit has a thread.
-    fn thread(&mut self, hit: &SearchHit, subjects: &Subjects) -> Option<(Thread, Vec<Newer>)> {
+    fn thread(
+        &mut self,
+        hit: &SearchHit,
+        subjects: &Subjects,
+        reader: &Reader,
+    ) -> Option<(Thread, Vec<Newer>)> {
         let dir = Path::new(&hit.source_path).parent()?.to_path_buf();
         let diary = self
             .0
             .entry(dir.clone())
-            .or_insert_with(|| load(&dir))
+            .or_insert_with(|| load(&dir, reader))
             .as_ref()?;
         let (rollup, name) = diary.thread_of(&hit.source_file)?;
         let of = |entry: &str| subjects.get(entry).cloned().unwrap_or_default();
@@ -194,7 +200,7 @@ impl Diaries {
 /// Every entry of a diary directory with its voided supersessions.
 /// A directory outside `--roots` (checked on the path as MemPalace recorded it, before any file
 /// system call) is not read at all.
-fn load(dir: &Path) -> Option<ThreadDiary> {
+fn load(dir: &Path, reader: &Reader) -> Option<ThreadDiary> {
     if !crate::paths::roots()
         .iter()
         .any(|root| dir.starts_with(root))
@@ -202,7 +208,12 @@ fn load(dir: &Path) -> Option<ThreadDiary> {
         return None;
     }
     let diary = Diary::open(&crate::paths::input(dir).ok()?).ok()?;
-    let names = diary.names().ok()?;
+    let names: Vec<_> = diary
+        .names()
+        .ok()?
+        .into_iter()
+        .filter(|n| reader.entry_visible(n).unwrap_or(false))
+        .collect();
     let voids = rollup::voided(&diary, &names).ok()?;
     let entries = names
         .iter()

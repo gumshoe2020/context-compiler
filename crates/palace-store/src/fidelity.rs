@@ -32,6 +32,8 @@ impl ClaimStore {
             params![row.point, row.file, row.kind, n(c.sampled), n(c.supported), n(c.missing), n(c.contradicted), n(c.unjudged), row.rollup_depth, row.primary_share, row.judge, row.items.to_string(), at],
         )? == 1;
         if added {
+            let marker = crate::privacy::origin(&tx, row.file)?;
+            crate::privacy::put(&tx, "fidelity", row.file, &marker)?;
             let line = json!({"operation":"fidelity","point":row.point,"file":row.file,"type":row.kind,"sampled":c.sampled,"supported":c.supported,"missing":c.missing,"contradicted":c.contradicted,"unjudged":c.unjudged,"at":at});
             write_log::append(&tx, &line.to_string())?;
         }
@@ -49,13 +51,48 @@ impl ClaimStore {
     /// The rows recorded at or after `since` (an ISO date or time), or in the last 30 days, with
     /// their items (JSON).
     pub fn fidelity_rows(&self, since: Option<&str>) -> Result<Vec<Value>, Error> {
-        let mut s = self.store.connection.prepare(
-            "SELECT point,file,type,sampled,supported,missing,contradicted,unjudged,judge,at,items FROM fidelity WHERE at >= coalesce(?1, strftime('%Y-%m-%dT%H:%M:%S','now','-30 days')) ORDER BY at, rowid",
-        )?;
+        let admitted = crate::privacy::shared_only("fidelity", "fidelity.file");
+        let mut s = self.store.connection.prepare(&format!(
+            "SELECT point,file,type,sampled,supported,missing,contradicted,unjudged,judge,at,items FROM fidelity WHERE at >= coalesce(?1, strftime('%Y-%m-%dT%H:%M:%S','now','-30 days')) AND {admitted} ORDER BY at, rowid"
+        ))?;
         let rows = s
             .query_map([since], |r| {
                 let items: Value = serde_json::from_str(&r.get::<_, String>(10)?).unwrap_or(Value::Null);
                 Ok(json!({"point":r.get::<_,String>(0)?,"file":r.get::<_,String>(1)?,"type":r.get::<_,String>(2)?,"sampled":r.get::<_,i64>(3)?,"supported":r.get::<_,i64>(4)?,"missing":r.get::<_,i64>(5)?,"contradicted":r.get::<_,i64>(6)?,"unjudged":r.get::<_,i64>(7)?,"judge":r.get::<_,String>(8)?,"at":r.get::<_,String>(9)?,"items":items}))
+            })?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+    /// Counts for the owner's digest from every fidelity row, private ones included.
+    /// Same window as `fidelity_rows`, but only numeric item counters leave this reader.
+    pub fn fidelity_counts(&self, since: Option<&str>) -> Result<Vec<Value>, Error> {
+        let mut s = self.store.connection.prepare(
+            "SELECT point,type,judge,sampled,supported,unjudged,items FROM fidelity WHERE at >= coalesce(?1, strftime('%Y-%m-%dT%H:%M:%S','now','-30 days')) ORDER BY at, rowid",
+        )?;
+        let rows = s
+            .query_map([since], |r| {
+                let source: Value =
+                    serde_json::from_str(&r.get::<_, String>(6)?).unwrap_or(Value::Null);
+                let mut items = json!({});
+                for key in ["values_unexplained", "values_skipped", "checklist_values"] {
+                    if let Some(n) = source[key].as_u64() {
+                        items[key] = json!(n);
+                    }
+                }
+                for key in ["specific", "concept", "entry"] {
+                    if let Some(n) = source["values_kept_in"][key].as_u64() {
+                        items["values_kept_in"][key] = json!(n);
+                    }
+                }
+                Ok(json!({
+                    "point": r.get::<_, String>(0)?,
+                    "type": r.get::<_, String>(1)?,
+                    "judge": r.get::<_, String>(2)?,
+                    "sampled": r.get::<_, i64>(3)?,
+                    "supported": r.get::<_, i64>(4)?,
+                    "unjudged": r.get::<_, i64>(5)?,
+                    "items": items,
+                }))
             })?
             .collect::<Result<_, _>>()?;
         Ok(rows)

@@ -256,8 +256,10 @@ dependencies = [
  "clap",
  "palace-core",
  "palace-judge",
+ "palace-mcp",
  "palace-mempalace",
  "palace-store",
+ "rusqlite",
  "serde",
  "serde_json",
 ]
@@ -305,6 +307,7 @@ version = "0.1.0"
 dependencies = [
  "palace-core",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
 ]

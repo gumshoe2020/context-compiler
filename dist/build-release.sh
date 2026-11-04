@@ -111,6 +111,7 @@ stage_now() {
   cp "$BIN_DIR/palace" "$BIN_DIR/palace-mcp" "$STAGE/bin/"
   cp "$ROOT/scripts/palace-cron.sh" "$ROOT/scripts/mempalace-check.sh" "$STAGE/scripts/"
   cp -R "$ROOT/prompts" "$STAGE/prompts"
+  rm -rf "$STAGE/prompts/local" # the owner's local policy never ships
   printf '[]\n' >"$STAGE/share/canaries.json"
   cp -R "$ROOT/dist" "$STAGE/dist"
   rm -rf "$STAGE/dist/test"

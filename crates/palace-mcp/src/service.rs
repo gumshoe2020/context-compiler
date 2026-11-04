@@ -31,6 +31,10 @@ impl Service {
         }
     }
     pub fn call(&mut self, params: &Value) -> Result<Value, Error> {
+        let session = params["_meta"]["context_compiler"]["conversation"].as_str();
+        palace_store::privacy::in_conversation(session, || self.call_inner(params))
+    }
+    fn call_inner(&mut self, params: &Value) -> Result<Value, Error> {
         let text = match params["name"].as_str() {
             Some(name) if name.starts_with("mempalace_kg_") => {
                 let (palace, kg, wal) = &self.graph;
@@ -41,6 +45,11 @@ impl Service {
                         palace_store::graph::GraphReader::open(kg)?.call(operation, &args)?
                     }
                     "add" | "invalidate" | "set_entity" | "retire_entity" => {
+                        if palace_store::privacy::identity().people.is_some()
+                            && palace_store::privacy::conversation_id().is_none()
+                        {
+                            return Err("graph write requires authenticated conversation".into());
+                        }
                         let mut graph =
                             palace_store::graph::Graph::open(palace, kg, wal.as_deref())?;
                         // M4d-2c item 6: settle any interrupted write before writing (a DIVERGED

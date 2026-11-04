@@ -15,9 +15,12 @@ pub mod graph;
 pub mod graph_checks;
 pub mod hold;
 pub mod inspect;
+pub mod items;
 pub mod lookup;
 pub mod m3b_checks;
 pub mod m5a_checks;
+pub mod privacy;
+pub mod privacy_backup;
 pub mod repeat;
 pub mod shadow_diff;
 pub mod terms;
@@ -87,6 +90,8 @@ impl Store {
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         connection.execute_batch(include_str!("schema.sql"))?;
         claims::migrate(&connection)?;
+        items::migrate(&connection)?;
+        connection.execute_batch(privacy::SCHEMA)?;
         claims::memory_types(&connection, path, existed)?;
         let store = Self {
             connection,

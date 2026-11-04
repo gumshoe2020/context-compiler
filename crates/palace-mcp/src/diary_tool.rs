@@ -55,9 +55,36 @@ impl DiaryTool {
     /// its directory), so a retry never files the entry twice. `mine_tries` when the mine was
     /// tried more than once.
     pub fn call(&self, args: &Value) -> Result<String, Error> {
+        let identity = palace_store::privacy::identity();
+        if identity.people.is_some() && palace_store::privacy::conversation_id().is_none() {
+            return Err("diary write requires authenticated conversation".into());
+        }
+        self.call_with_marker(args, None)
+    }
+    /// Authenticated adapter write: ignore model wing overrides and file in the main diary.
+    /// The caller resolves this marker from host authority, never from tool arguments.
+    pub fn call_main(
+        &self,
+        args: &Value,
+        marker: palace_store::privacy::Marker,
+    ) -> Result<String, Error> {
+        if marker.quarantine || marker.people.is_empty() {
+            return Err("diary write requires authenticated identity".into());
+        }
+        if self.options.wings.is_some() {
+            return Err("main diary write cannot use wings-root".into());
+        }
+        let args = json!({"text":args["text"], "title":args["title"]});
+        self.call_with_marker(&args, Some(marker))
+    }
+    fn call_with_marker(
+        &self,
+        args: &Value,
+        marker: Option<palace_store::privacy::Marker>,
+    ) -> Result<String, Error> {
         let entry = Entry::from(args, &self.options.wing)?;
         let root = self.root_of(&entry.wing)?;
-        let path = self.write(&root, &entry)?;
+        let path = self.write(&root, &entry, marker)?;
         let mut tries = 0;
         let mined = self.mine(&root, &entry.wing, &mut tries);
         let mut result = json!({"file":path,"wing":entry.wing,"mined":mined.is_ok()});
@@ -92,12 +119,26 @@ impl DiaryTool {
             _ => Ok(o.root.clone()),
         }
     }
-    fn write(&self, root: &Path, entry: &Entry) -> Result<PathBuf, Error> {
+    fn write(
+        &self,
+        root: &Path,
+        entry: &Entry,
+        marker: Option<palace_store::privacy::Marker>,
+    ) -> Result<PathBuf, Error> {
         let millis = i64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis())?;
         let day = local_date(millis.div_euclid(1000))?;
         let file = palace_core::diary_file::render_on(&day, millis, &entry.title, &entry.text);
         let diary = root.join("diary");
         let path = absolute(&diary)?.join(&file.name);
+        let mut store =
+            palace_store::claims::ClaimStore::open(&self.options.palace.join("compiler.sqlite"))?;
+        let marker = marker.unwrap_or_else(|| match &palace_store::privacy::conversation_id() {
+            Some(session) => palace_store::privacy::conversation(session, &entry.wing),
+            None => palace_store::privacy::Marker::quarantine("unidentified:mcp"),
+        });
+        let marker = palace_store::privacy::tagged_entry(&marker, &file.content);
+        store.mark_entry(&file.name, &marker)?;
+        drop(store);
         let mut out = fs::OpenOptions::new()
             .write(true)
             .create_new(true)

@@ -1,0 +1,63 @@
+{
+  "people": {
+    "ann": {
+      "handles": [
+        "signal:+12025550100"
+      ],
+      "owner": true
+    },
+    "bryn": {
+      "handles": [
+        "signal:+12025550102"
+      ]
+    },
+    "wren": {
+      "handles": [
+        "signal:+12025550101",
+        "email:wren@example.invalid"
+      ],
+      "private": true
+    },
+    "nella": {
+      "handles": [
+        "signal:+12025550103"
+      ],
+      "private": true
+    }
+  },
+  "conversations": [
+    {
+      "match": "synthetic-shared",
+      "people": [
+        "ann"
+      ]
+    },
+    {
+      "match": "synthetic-private",
+      "people": [
+        "wren"
+      ],
+      "private": true
+    },
+    {
+      "match": "synthetic-group",
+      "people": [
+        "ann",
+        "wren"
+      ]
+    },
+    {
+      "match": "synthetic-cron",
+      "people": [
+        "wren"
+      ],
+      "private": true
+    },
+    {
+      "match": "synthetic-shared-2",
+      "people": [
+        "ann"
+      ]
+    }
+  ]
+}
