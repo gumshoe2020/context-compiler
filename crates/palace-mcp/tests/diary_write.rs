@@ -242,10 +242,21 @@ fn a_held_lock_is_retried_within_the_deadline() {
     fs::write(&mempalace, script).unwrap();
     fs::set_permissions(&mempalace, fs::Permissions::from_mode(0o755)).unwrap();
     fs::write(&held, "").unwrap();
+    // Let go after the second refused try, not after a fixed wall-clock delay: under load the
+    // call's setup can take longer than the gap between tries, which made a timed release land
+    // before the second try (mine_tries 2).
     let release = {
         let held = held.clone();
+        let log = s.dir.join("mine.log");
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(1500));
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            while fs::read_to_string(&log).map_or(0, |t| t.lines().count()) < 2 {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "second try never came"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
             fs::remove_file(held).unwrap();
         })
     };

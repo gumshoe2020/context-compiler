@@ -18,10 +18,11 @@ MEMORY_APPROVED="mempalace_status mempalace_search mempalace_check_duplicate mem
 # shellcheck disable=SC2034
 GRAPH_APPROVED="mempalace_kg_query mempalace_kg_entities mempalace_kg_timeline mempalace_kg_stats
   palace_diary_write palace_reply"
-# cc-memory never holds the palace's mine lock for a whole session (MemPalace 3.5.0's
-# mempalace-mcp takes it on its first status call or write and keeps it while it runs, so every
-# palace_diary_write mine and the nightly job's mines failed while the agent was open); its own
-# writes still take the lock one at a time (PKG-2 item 0).
+# MemPalace 3.5.0's mempalace-mcp kept the mine lock after status for the whole
+# session, blocking diary and nightly mines. This setting allowed peer writers.
+# Real 3.11.0 status sessions allow mining with or without it (mine_contention), so
+# the workaround is no longer needed for that case. Retained here for this task;
+# the check still proves installed cc-memory never blocks an immediate mine.
 PEER_WRITER=MEMPALACE_MCP_ALLOW_PEER_WRITER=1
 
 # --- before the install ------------------------------------------------------------------
