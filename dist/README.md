@@ -112,7 +112,7 @@ Everything lives in two places, plus two launchd agents:
 | `~/Library/LaunchAgents` | `com.context-compiler.settle.plist` (runs when `$CC_HOME/state/settle.request` changes) and `com.context-compiler.daily.plist` (05:00 daily); with `--no-load` they are written to `$CC_HOME/launchd/` instead and nothing is loaded; an earlier install's `com.context-compiler.nightly` and `com.context-compiler.compression` agents are booted out and removed |
 
 MemPalace: a `mempalace-mcp` on PATH at the pin (the `PIN=` of `scripts/mempalace-check.sh`,
-today 3.5.0) is used as it is. One at another version stops the install before any change, with
+today 3.11.0) is used as it is. One at another version stops the install before any change, with
 the command to run: a MemPalace is never replaced. With none on PATH, uv installs the pin into
 `$CC_HOME/uv` (`UV_TOOL_DIR=$CC_HOME/uv/tools UV_TOOL_BIN_DIR=$CC_HOME/uv/bin uv tool install
 mempalace==<pin>`), so nothing goes in `~/.local/bin`; uninstall removes it.

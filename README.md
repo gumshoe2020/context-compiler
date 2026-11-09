@@ -1,7 +1,7 @@
 # context-compiler
 
 A memory compiler for coding and chat assistants, in Rust. It sits on top of
-[MemPalace](https://pypi.org/project/mempalace/) (pinned at 3.5.0), which stores and searches a
+[MemPalace](https://pypi.org/project/mempalace/) (pinned at 3.11.0), which stores and searches a
 diary of conversations, and decides what gets *compiled* from that diary:
 
 - **distillation**: when a conversation ends, its new text becomes diary entries, typed claims
@@ -19,7 +19,7 @@ No model is required by the core: the commands that need one (distill, rollup, t
 `--llm`/`--judge` spec, either a command that reads the prompt on stdin or a recorded table.
 
 **Status: alpha.** Built for one user's setup (macOS on Apple silicon, Codex or Claude Code,
-MemPalace 3.5.0). It runs there daily; anywhere else, expect rough edges. Issues welcome,
+MemPalace 3.11.0). It runs there daily; anywhere else, expect rough edges. Issues welcome,
 support is best effort.
 
 ## Install

@@ -5,7 +5,7 @@ SPEC-claims-and-improvement.md v1.0 for claims, DEPS.md for the dependency tree.
 
 ## 1. Purpose
 
-MemPalace 3.5.0 is the memory store: it mines the diary, embeds, searches and keeps the knowledge
+MemPalace 3.11.0 is the memory store: it mines the diary, embeds, searches and keeps the knowledge
 graph file. The context compiler is Callum's value-add on top of that pinned store. It decides what
 may enter the graph (the write gate), compiles graph context for a question (traverse and the seven
 compile tasks), compresses scattered diary threads into claims-first rollups, and checks those
@@ -242,7 +242,7 @@ kept in the `rollup_commit` log row, so the name can be re-derived from the cont
 ## 7. Operations
 
 `scripts/mempalace-check.sh [--install] [--palace <dir>] [--diary <dir>] [--quiet]` checks uv,
-the exact 3.5.0 pin (CLI and `mempalace-mcp` serverInfo), palace layout, diary count, KG
+the exact 3.11.0 pin (CLI and `mempalace-mcp` serverInfo), palace layout, diary count, KG
 `integrity_check`, and an MCP handshake plus smoke search. It is read-only unless `--install`,
 which (re)installs the pin with `uv tool install`. `palace init` runs it.
 
@@ -253,14 +253,14 @@ palace doctor --acceptance m3c --palace target/m3c/palace --diary fixtures/diary
   --kg target/m3c/palace/knowledge_graph.sqlite3 --rollups fixtures/rollups \
   --expected-gate fixtures/rollups/EXPECTED.json \
   --expected-traverse fixtures/graph/EXPECTED-traverse.json --mcp target/release/palace-mcp
-M3c OK mempalace=3.5.0 tests=<n>/<n> batch_parity=16/16 traverse_parity=32/32 compile_modes=56/56 retire=ok stress=ok mcp_kg_tools=8 chain=ok crates=<n>
+M3c OK mempalace=3.11.0 tests=<n>/<n> batch_parity=16/16 traverse_parity=32/32 compile_modes=56/56 retire=ok stress=ok mcp_kg_tools=8 chain=ok crates=<n>
 
 palace doctor --acceptance m4a … --reports fixtures/fidelity-reports --canaries fixtures/canaries.json \
   --expected-claims fixtures/rollups/EXPECTED-claims.json
 M4a OK tests=<n>/<n> reports_match=5/5 exit_codes_match=5/5 claims=<k>/<k> header_reads=<n>>0 version_pin=cli+server batch_isolated=ok kg_default=ok
 
 palace init target/m4b/diary-root target/m4b/palace-init --mempalace-check scripts/mempalace-check.sh
-INIT OK mempalace=3.5.0 entries=452 drawers=<n> kg=… compiler=…
+INIT OK mempalace=3.11.0 entries=452 drawers=<n> kg=… compiler=…
 palace doctor --acceptance m4b --diary target/m4b/diary-root … --prompts prompts
 M4b OK bail=ok select=halloran-thread pull=<n> validate=pass claims=12 relations=1 dryrun=ok commit=ok recipe=ok malformed=finding grammar=ok reversal=flagged mempalace_down=exit3 judge_clean=ok store=ok
 ```

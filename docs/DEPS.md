@@ -2,7 +2,7 @@
 
 Only PLAN.md's named list is used. No crate was added for palace-mempalace: `std::process`,
 `std::sync::mpsc` and `std::thread` run and time out the `mempalace-mcp` / `mempalace` children.
-The runtime MemPalace dependency is not a crate: it is `mempalace==3.5.0` (uv tool), checked by
+The runtime MemPalace dependency is not a crate: it is `mempalace==3.11.0` (uv tool), checked by
 `mempalace --version` and MCP initialize.serverInfo.version at start-up and by `scripts/mempalace-check.sh`.
 
 | Direct dependency | Used by | Reason | Pulls in (normal + build, incl. itself) |
