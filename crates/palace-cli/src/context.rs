@@ -228,84 +228,21 @@ fn search(o: &Options, message: &str, deadline: Instant) -> Result<Vec<SearchHit
         &crate::paths::input(&o.kg)?,
     )?
     .with_readers(readers(o));
-    let hits = match reader.marked_entries()? {
-        None => mempalace.search_in(&query, scope.limit(), 0.0, scope.filter()),
-        Some(entries) => {
-            if entries.is_empty() {
-                return Ok(Vec::new());
-            }
-            // One ranked window, not one vector query per diary file. A late timeout in
-            // the old fan-out discarded *all* earlier hits, even for marked shared data.
-            // If hidden rows fill the window, query admitted sources to recover the rest.
-            let candidates = mempalace.search_in(&query, 100, 0.0, scope.filter())?;
-            let overflow = candidates.len() == 100;
-            let admitted: BTreeSet<_> = entries.iter().map(|e| format!("{e}.md")).collect();
-            let mut hits: Vec<SearchHit> = candidates
-                .into_iter()
-                .filter(|h| admitted.contains(&h.source_file) && scope.admits(&h.wing))
-                .collect();
-            let fallback = overflow && hits.len() < SEARCH_HITS;
-            for entry in entries.into_iter().filter(|_| fallback) {
-                if Instant::now() >= deadline {
-                    break;
-                }
-                let source = format!("{entry}.md");
-                let found = match mempalace.search_source(
-                    &query,
-                    scope.limit(),
-                    0.0,
-                    scope.filter(),
-                    Some(&source),
-                ) {
-                    Ok(found) => found,
-                    // Keep already admitted hits if the remaining search runs out of time.
-                    Err(_) if Instant::now() >= deadline => break,
-                    Err(error) => return Err(error),
-                };
-                for hit in found {
-                    if hit.source_file == source
-                        && scope.admits(&hit.wing)
-                        && !hits.iter().any(|h: &SearchHit| {
-                            h.source_path == hit.source_path && h.text == hit.text
-                        })
-                    {
-                        hits.push(hit);
-                    }
-                }
-            }
-            order_merged(&mut hits, fallback);
-            Ok(hits)
+    let mut hits = Vec::new();
+    for window in [scope.limit(), 100, 400, 1600, i32::MAX as usize] {
+        let candidates = mempalace.search_window(&query, window, 0.0, scope.filter(), None)?;
+        let exhausted = candidates.len() < window;
+        hits = palace_core::search_hit::distinct_entries(candidates, SEARCH_HITS, |h| {
+            scope.admits(&h.wing) && reader.entry_visible(&h.source_file).unwrap_or(false)
+        });
+        if exhausted || hits.len() >= SEARCH_HITS {
+            break;
         }
-    };
-    if let Some(reason) = mempalace
-        .unavailable()
-        .filter(|_| hits.as_ref().is_ok_and(|h| h.is_empty()))
-    {
+    }
+    if let Some(reason) = mempalace.unavailable().filter(|_| hits.is_empty()) {
         return Err(reason.into());
     }
-    let admitted = hits?
-        .into_iter()
-        .filter(|h| scope.admits(&h.wing) && reader.entry_visible(&h.source_file).unwrap_or(false));
-    Ok(admitted.take(SEARCH_HITS).collect())
-}
-
-/// The window keeps MemPalace's own ranking; only hits merged in from per-source fallback
-/// queries have no common order, so those are sorted by distance.
-fn order_merged(hits: &mut [SearchHit], fallback: bool) {
-    if !fallback {
-        return;
-    }
-    let score = |h: &SearchHit| {
-        h.metadata
-            .get("distance")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0)
-    };
-    hits.sort_by(|a, b| {
-        score(a)
-            .total_cmp(&score(b))
-            .then_with(|| a.source_file.cmp(&b.source_file))
-    });
+    Ok(hits)
 }
 
 /// The wings excerpts may come from: `--wing`, or every wing but `--exclude-wing`'s.
@@ -401,29 +338,6 @@ mod tests {
     struct Cli {
         #[command(flatten)]
         options: Options,
-    }
-    fn hit_at(file: &str, distance: f64) -> SearchHit {
-        let mut metadata = serde_json::Map::new();
-        metadata.insert("distance".into(), distance.into());
-        SearchHit {
-            text: String::new(),
-            source_path: file.into(),
-            source_file: file.into(),
-            wing: "openclaw".into(),
-            room: "general".into(),
-            metadata,
-        }
-    }
-    fn files(hits: &[SearchHit]) -> Vec<&str> {
-        hits.iter().map(|h| h.source_file.as_str()).collect()
-    }
-    #[test]
-    fn the_window_keeps_mempalaces_order_and_only_fallback_hits_are_sorted() {
-        let mut hits = vec![hit_at("b.md", 0.9), hit_at("a.md", 0.2)];
-        order_merged(&mut hits, false);
-        assert_eq!(files(&hits), ["b.md", "a.md"]);
-        order_merged(&mut hits, true);
-        assert_eq!(files(&hits), ["a.md", "b.md"]);
     }
     fn parse(extra: &[&str]) -> Result<Options, clap::Error> {
         let base = [

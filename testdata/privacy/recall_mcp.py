@@ -4,6 +4,12 @@ import json
 import os
 from pathlib import Path
 import sys
+
+import re
+_check = (Path(os.environ['PALACE_MEMPALACE_CHECK']) if os.environ.get('PALACE_MEMPALACE_CHECK') else
+          next(parent / 'scripts/mempalace-check.sh' for parent in Path(__file__).resolve().parents
+               if (parent / 'scripts/mempalace-check.sh').is_file()))
+PIN = re.search(r'^PIN=["\']?([^"\'\s]+)', _check.read_text(), re.M).group(1)
 import time
 
 work = Path(os.environ['PRIV1C_RECALL'])
@@ -13,7 +19,7 @@ for line in sys.stdin:
         continue
     if request['method'] == 'initialize':
         result = dict(protocolVersion='2024-11-05', capabilities={},
-                      serverInfo=dict(name='synthetic-drawers', version='3.5.0'))
+                      serverInfo=dict(name='synthetic-drawers', version=PIN))
     elif request['method'] == 'tools/list':
         result = dict(tools=[dict(name='mempalace_search')])
     else:

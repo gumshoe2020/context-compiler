@@ -116,7 +116,7 @@ shutil.copy(ROOT/'dist/common/settle.sh', CTX/'bin/settle.sh')
 shutil.copytree(ROOT/'prompts', CTX/'prompts', dirs_exist_ok=True)
 for name in ['mempalace','mempalace-mcp']:
     shutil.copy(ROOT/'testdata/privacy/memory.py',CTX/'bin'/name)
-(CTX/'scripts/mempalace-check.sh').write_text('PIN="3.5.0"\n')
+(CTX/'scripts/mempalace-check.sh').write_text(next(line for line in (ROOT/'scripts/mempalace-check.sh').read_text().splitlines() if line.startswith('PIN=')) + '\n')
 (CTX/'env.sh').write_text(f'MEMPALACE_BIN_DIR="{CTX}/bin"\nWING=openclaw\nPERSON=ann\nASSISTANT=pip\nSETTLE_DEBOUNCE_SECONDS=0\nDISTILL_MIN_TURNS=1\n')
 transcript = CTX/'transcripts/tag-settle.jsonl'
 phrase = 'Invented Tern uses violet glider.'

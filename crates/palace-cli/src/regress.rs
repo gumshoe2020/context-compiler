@@ -596,7 +596,14 @@ mod tests {
     #[test]
     fn pin_is_read_from_the_check_script() {
         checkout_pin();
-        assert_eq!(palace_mempalace::version::pin().unwrap(), "3.5.0");
+        let script = palace_mempalace::version::script();
+        let text = fs::read_to_string(&script).unwrap();
+        let expected = text
+            .lines()
+            .find_map(|line| line.strip_prefix("PIN="))
+            .expect("check script has PIN=")
+            .trim_matches('"');
+        assert_eq!(palace_mempalace::version::pin().unwrap(), expected);
     }
 
     #[test]

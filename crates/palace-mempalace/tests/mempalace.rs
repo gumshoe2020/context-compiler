@@ -20,10 +20,13 @@ fn checkout_default() -> std::path::PathBuf {
 #[test]
 fn pin_is_read_from_the_real_check_script() {
     let script = checkout_default();
-    assert_eq!(version::pin_from(&script).unwrap(), "3.5.0");
+    let expected =
+        palace_core::regress::parse_pin(include_str!("../../../scripts/mempalace-check.sh"))
+            .unwrap();
+    assert_eq!(version::pin_from(&script).unwrap(), expected);
     assert_eq!(
         version::pin().unwrap(),
-        "3.5.0",
+        expected,
         "default = the repository's script"
     );
     let missing = version::pin_from(Path::new("/nonexistent/mempalace-check.sh")).unwrap_err();
@@ -60,8 +63,12 @@ fn a_mismatched_script_names_the_scripts_pin() {
 fn version_pin_is_exact_unless_allowed() {
     checkout_default();
     let dir = tempfile::tempdir().unwrap();
-    let pinned = fake_version(dir.path(), "MemPalace 3.5.0");
-    assert_eq!(version::check(&pinned, false).unwrap(), "MemPalace 3.5.0");
+    let output = format!(
+        "MemPalace {}",
+        version::pin_from(&checkout_default()).unwrap()
+    );
+    let pinned = fake_version(dir.path(), &output);
+    assert_eq!(version::check(&pinned, false).unwrap(), output);
     let other = fake_version(dir.path(), "MemPalace 3.5.1");
     assert!(version::check(&other, false).is_err());
     assert_eq!(version::check(&other, true).unwrap(), "MemPalace 3.5.1");

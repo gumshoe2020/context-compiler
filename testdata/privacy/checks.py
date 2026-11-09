@@ -79,7 +79,7 @@ def distill(session, subject, obj, private=False):
     if private:
         shutil.copy(ROOT/'dist/common/settle.sh',CTX/'bin/settle.sh')
         (CTX/'scripts').mkdir(exist_ok=True)
-        (CTX/'scripts/mempalace-check.sh').write_text('PIN="3.5.0"\n')
+        (CTX/'scripts/mempalace-check.sh').write_text(next(line for line in (ROOT/'scripts/mempalace-check.sh').read_text().splitlines() if line.startswith('PIN=')) + '\n')
         (CTX/'env.sh').write_text(f'MEMPALACE_BIN_DIR="{CTX}/bin"\nWING=openclaw\nPERSON=ann\nASSISTANT=pip\nSETTLE_DEBOUNCE_SECONDS=0\nDISTILL_MIN_TURNS=1\nCONTEXT_LAYERED=1\n')
         shutil.copytree(ROOT/'prompts',CTX/'prompts',dirs_exist_ok=True)
         (CTX/'state/settle.request').write_text('openclaw\t'+str(transcript)+'\n')

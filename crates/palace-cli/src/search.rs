@@ -1,6 +1,6 @@
 //! Marker-aware memory search for adapters. Identity is supplied by the authenticated caller.
 use clap::Args;
-use palace_core::search_hit::SearchHit;
+use palace_core::search_hit::{SearchHit, distinct_entries};
 use palace_mempalace::MemPalace;
 use palace_store::{Error, privacy};
 use rusqlite::{Connection, OpenFlags};
@@ -111,22 +111,10 @@ fn search(o: &Options, readers: &[String]) -> Result<Vec<SearchHit>, Error> {
     for window in [100, 400, 1600, i32::MAX as usize] {
         let candidates = memory.search_window(&o.query, window, o.max_distance, None, None)?;
         let exhausted = candidates.len() < window;
-        hits = candidates.into_iter().filter(&allowed).collect();
+        hits = distinct_entries(candidates, o.limit as usize, &allowed);
         if exhausted || hits.len() >= o.limit as usize {
             break;
         }
     }
-    hits.sort_by(|a, b| {
-        let distance = |h: &SearchHit| {
-            h.metadata
-                .get("distance")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0)
-        };
-        distance(a)
-            .total_cmp(&distance(b))
-            .then_with(|| a.source_file.cmp(&b.source_file))
-    });
-    hits.truncate(o.limit as usize);
     Ok(hits)
 }

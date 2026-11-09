@@ -10,7 +10,7 @@
 # Exit 0 = healthy; 1 = a check failed; 2 = usage/tooling missing.
 # Read-only except with --install. Never touches the palace or diary contents.
 set -u
-PIN="3.5.0"
+PIN="3.11.0"
 PALACE="${HOME}/.mempalace/openclaw-palace"
 DIARY="${HOME}/.openclaw/mempalace-diary/diary"
 INSTALL=0; QUIET=0

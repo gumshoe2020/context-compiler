@@ -5,8 +5,14 @@ import os
 from pathlib import Path
 import sys
 
+import re
+_check = (Path(os.environ['PALACE_MEMPALACE_CHECK']) if os.environ.get('PALACE_MEMPALACE_CHECK') else
+          next(parent / 'scripts/mempalace-check.sh' for parent in Path(__file__).resolve().parents
+               if (parent / 'scripts/mempalace-check.sh').is_file()))
+PIN = re.search(r'^PIN=["\']?([^"\'\s]+)', _check.read_text(), re.M).group(1)
+
 if '--version' in sys.argv:
-    print('MemPalace 3.5.0')
+    print(f'MemPalace {PIN}')
     sys.exit(0)
 if 'mine' in sys.argv:
     sys.exit(0)
@@ -17,7 +23,7 @@ for line in sys.stdin:
     method = request['method']
     if method == 'initialize':
         result = dict(protocolVersion='2024-11-05', capabilities={},
-                      serverInfo=dict(name='synthetic-memory', version='3.5.0'))
+                      serverInfo=dict(name='synthetic-memory', version=PIN))
     elif method == 'tools/list':
         result = dict(tools=[dict(name='mempalace_search')])
     else:
